@@ -61,12 +61,13 @@ Omit the "-S" for the standard TSViT configuration, or include it (TSViT-S) for 
 #### Results
 | Model name         | #Params| OA  |  mIoU |
 | ------------------ |---- |---- | ---| 
-| TSViT   | 1.657M|    83.4%    |  65.4%| 
+| TSViT   | 1.657M|    83.6%    |  65.9%| 
 | TSViT-S   | 0.436M|    83.05%    |  64.3%| 
 | [U-TAE](https://github.com/VSainteuf/utae-paps)   |   1.1M| 83.2%   | 63.1%|
 
 ### Pre-trained checkpoints
-Download 5-fold PASTIS24 [pre-trained models and tensorboard files](https://drive.google.com/file/d/1AzWEtHxojuCjaIsekja4J54LuEb9e7kw/view?usp=share_link).
+Download 5-fold PASTIS24 [pre-trained models and tensorboard files](https://drive.google.com/file/d/1GQSNt4DzXt9tBwANnURYQNsVtQtRLRWW/view?usp=sharing). 
+Note: these checkpoints were retrained after patchification correction in https://github.com/michaeltrs/DeepSatModels/pull/23 and perform a little better than before. e.g. mIoU now is 65.9% vs 65.4% previously.
 
 
 ## BibTex
