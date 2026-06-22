@@ -82,9 +82,10 @@ class STViT(nn.Module):
         x = x.mean(dim=1) if self.pool == 'mean' else x[:, 0]
         x = self.mlp_head(x)
         x = x.reshape(B, self.num_patches_1d**2, self.patch_size**2, self.num_classes)
-        x = x.reshape(B, H*W, self.num_classes)
-        x = x.reshape(B, H, W, self.num_classes)
-        x = x.permute(0, 3, 1, 2)
+        
+        x = rearrange(x, 'b (h1 w1) (p1 p2) c -> b c (h1 p1) (w1 p2)', 
+                      h1=self.num_patches_1d, w1=self.num_patches_1d, 
+                      p1=self.patch_size, p2=self.patch_size)
         return x
 
 
@@ -159,9 +160,10 @@ class TSViT_single_token(nn.Module):
         x = self.space_transformer(x)
         x = self.mlp_head(x)
         x = x.reshape(B, self.num_patches_1d**2, self.patch_size**2, self.num_classes)
-        x = x.reshape(B, H*W, self.num_classes)
-        x = x.reshape(B, H, W, self.num_classes)
-        x = x.permute(0, 3, 1, 2)
+        
+        x = rearrange(x, 'b (h1 w1) (p1 p2) c -> b c (h1 p1) (w1 p2)', 
+                      h1=self.num_patches_1d, w1=self.num_patches_1d, 
+                      p1=self.patch_size, p2=self.patch_size)
         return x
 
 
@@ -228,9 +230,11 @@ class TSViT_static_position_encodings(nn.Module):
         x = self.dropout(x)
         x = self.space_transformer(x)
         x = self.mlp_head(x.reshape(-1, self.dim))
-        x = x.reshape(B, self.num_classes, self.num_patches_1d**2, self.patch_size**2).permute(0, 2, 3, 1)
-        x = x.reshape(B, H, W, self.num_classes)
-        x = x.permute(0, 3, 1, 2)
+        x = x.reshape(B, self.num_classes, self.num_patches_1d**2, self.patch_size**2)
+        
+        x = rearrange(x, 'b c (h1 w1) (p1 p2) -> b c (h1 p1) (w1 p2)', 
+                      h1=self.num_patches_1d, w1=self.num_patches_1d, 
+                      p1=self.patch_size, p2=self.patch_size)
         return x
 
 
@@ -295,9 +299,11 @@ class TSViT_global_attention_spatial_encoder(nn.Module):
         x = x.reshape(B, self.num_classes * self.num_patches_1d**2, self.dim)
         x = self.space_transformer(x)
         x = self.mlp_head(x.reshape(-1, self.dim))
-        x = x.reshape(B, self.num_classes, self.num_patches_1d**2, self.patch_size**2).permute(0, 2, 3, 1)
-        x = x.reshape(B, H, W, self.num_classes)
-        x = x.permute(0, 3, 1, 2)
+        x = x.reshape(B, self.num_classes, self.num_patches_1d**2, self.patch_size**2)
+        
+        x = rearrange(x, 'b c (h1 w1) (p1 p2) -> b c (h1 p1) (w1 p2)', 
+                      h1=self.num_patches_1d, w1=self.num_patches_1d, 
+                      p1=self.patch_size, p2=self.patch_size)
         return x
 
 
@@ -356,9 +362,11 @@ class TViT(nn.Module):
         x = x[:, :self.num_classes]
         x = x.reshape(B, self.num_patches_1d**2, self.num_classes, self.dim).permute(0, 2, 1, 3).reshape(B*self.num_classes, self.num_patches_1d**2, self.dim)
         x = self.mlp_head(x.reshape(-1, self.dim))
-        x = x.reshape(B, self.num_classes, self.num_patches_1d**2, self.patch_size**2).permute(0, 2, 3, 1)
-        x = x.reshape(B, H, W, self.num_classes)
-        x = x.permute(0, 3, 1, 2)
+        x = x.reshape(B, self.num_classes, self.num_patches_1d**2, self.patch_size**2)
+        
+        x = rearrange(x, 'b c (h1 w1) (p1 p2) -> b c (h1 p1) (w1 p2)', 
+                      h1=self.num_patches_1d, w1=self.num_patches_1d, 
+                      p1=self.patch_size, p2=self.patch_size)
         return x
 
 
@@ -432,9 +440,11 @@ class TSViT(nn.Module):
         x = self.dropout(x)
         x = self.space_transformer(x)
         x = self.mlp_head(x.reshape(-1, self.dim))
-        x = x.reshape(B, self.num_classes, self.num_patches_1d**2, self.patch_size**2).permute(0, 2, 3, 1)
-        x = x.reshape(B, H, W, self.num_classes)
-        x = x.permute(0, 3, 1, 2)
+        x = x.reshape(B, self.num_classes, self.num_patches_1d**2, self.patch_size**2)
+        
+        x = rearrange(x, 'b c (h1 w1) (p1 p2) -> b c (h1 p1) (w1 p2)', 
+                      h1=self.num_patches_1d, w1=self.num_patches_1d, 
+                      p1=self.patch_size, p2=self.patch_size)
         return x
 
 
@@ -514,9 +524,11 @@ class TSViT_lookup(nn.Module):
         x = self.dropout(x)
         x = self.space_transformer(x)
         x = self.mlp_head(x.reshape(-1, self.dim))
-        x = x.reshape(B, self.num_classes, self.num_patches_1d**2, self.patch_size**2).permute(0, 2, 3, 1)
-        x = x.reshape(B, H, W, self.num_classes)
-        x = x.permute(0, 3, 1, 2)
+        x = x.reshape(B, self.num_classes, self.num_patches_1d**2, self.patch_size**2)
+        
+        x = rearrange(x, 'b c (h1 w1) (p1 p2) -> b c (h1 p1) (w1 p2)', 
+                      h1=self.num_patches_1d, w1=self.num_patches_1d, 
+                      p1=self.patch_size, p2=self.patch_size)
         return x
 
     def update_inference_temporal_position_embeddings(self):

@@ -7,6 +7,9 @@ presented at CVPR 2023.
 
 To begin model training or evaluation, adjust the `.yaml` configuration files as necessary to specify the save directory or to load a pre-trained model from available checkpoints.
 
+> [!NOTE]
+> The spatial reconstruction step at the end of the dense/segmentation forward pass has been corrected using `einops.rearrange` to faithfully map flattened patch embeddings back to their 2D positions.
+
 ### Semantic Segmentation
 
 To train for semantic segmentation, execute the following command, replacing `**` with the appropriate directory names:
