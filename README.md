@@ -40,22 +40,33 @@ Kiến trúc TSViT phân tách việc xử lý chuỗi ảnh viễn thám thành
 Khối mã hóa không gian mới được xây dựng tại [`models/TSViT/dinov3.py`](models/TSViT/dinov3.py) với 3 thành phần chính:
 
 ### 2.1. 2D Axial Rotary Position Embedding (2D RoPE)
-- **Cũ (TSViT)**: Sử dụng 1D learnable position embedding tĩnh dạng cộng vector (`x += pos_embedding`). Cách này làm phẳng lưới $H \times W$ thành chuỗi 1D, làm mất tương quan hình học 2 chiều.
-- **Mới (DINO-v3)**: Tự động tính toán tần số quay theo 2 trục độc lập (hàng $H_p$ và cột $W_p$) và xoay trực tiếp vector Query ($Q$) và Key ($K$):
-  $$\mathbf{q}_{m, n} = \mathbf{R}_{\Theta, m, n}^{2\text{D}} \mathbf{W}_q \mathbf{x}_{m, n}, \quad \mathbf{k}_{m, n} = \mathbf{R}_{\Theta, m, n}^{2\text{D}} \mathbf{W}_k \mathbf{x}_{m, n}$$
-  Phép tích vô hướng giữa 2 patch phụ thuộc trực tiếp vào khoảng cách tương đối $(\Delta m, \Delta n)$, giúp mô hình duy trì tính bất biến tịnh tiến không gian.
+* **Cơ chế cũ (TSViT)**: Sử dụng 1D learnable position embedding tĩnh dạng cộng vector (`x = x + pos_embedding`). Khi làm phẳng lưới `(H x W)` thành chuỗi 1D, thông tin hình học 2 chiều và khoảng cách tương đối giữa các ô thửa ruộng bị mất đi.
+* **Cơ chế mới (DINO-v3)**:
+  * Phân tách tần số quay theo 2 trục không gian độc lập: trục hàng (`H`) và trục cột (`W`).
+  * Xoay trực tiếp vector Query (`Q`) và Key (`K`) trong không gian phức:
+    ```python
+    # Phép xoay Query và Key theo tọa độ 2D (H, W)
+    q_rot = (q * cos) + (rotate_half(q) * sin)
+    k_rot = (k * cos) + (rotate_half(k) * sin)
+    ```
+  * **Ưu điểm**: Tích vô hướng chú ý giữa hai patch chỉ phụ thuộc vào khoảng cách tương đối `(ΔH, ΔW)`, đảm bảo tính bất biến tịnh tiến không gian, giúp nhận diện biên thửa ruộng chính xác hơn.
 
 ### 2.2. SwiGLU Gated Feed-Forward Network
-- **Cũ (TSViT)**: MLP 2 lớp với hàm kích hoạt GELU thông thường.
-- **Mới (DINO-v3)**: Sử dụng cấu trúc cổng SwiGLU (Swish Gated Linear Unit):
-  $$\text{SwiGLU}(\mathbf{x}) = \left( \text{SiLU}(\mathbf{x} \mathbf{W}_{\text{gate}}) \odot (\mathbf{x} \mathbf{W}_{\text{up}}) \right) \mathbf{W}_{\text{down}}$$
-  Cơ chế cổng nhân (multiplicative gating) giúp lọc các kênh phổ nhiễu và tăng cường phản hồi đặc trưng biên thửa.
+* **Cơ chế cũ (TSViT)**: MLP 2 lớp với hàm kích hoạt GELU thông thường (`Linear -> GELU -> Dropout -> Linear`).
+* **Cơ chế mới (DINO-v3)**: Sử dụng khối Swish Gated Linear Unit (SwiGLU):
+  ```python
+  # Cơ chế cổng nhân SwiGLU
+  output = (F.silu(x @ W_gate) * (x @ W_up)) @ W_down
+  ```
+  Nhánh cổng nhân (`multiplicative gating`) giúp mô hình chủ động lọc bớt nhiễu phổ vệ tinh và làm sắc nét các đường ranh giới ô đất.
 
 ### 2.3. LayerScale Stabilization
-- Mỗi khối DINO-v3 được tích hợp vector hệ số tỉ lệ đường chéo $\boldsymbol{\gamma}_1, \boldsymbol{\gamma}_2 \in \mathbb{R}^D$ khởi tạo với giá trị nhỏ $\varepsilon = 10^{-5}$:
-  $$\mathbf{x}'_l = \mathbf{x}_l + \text{diag}(\boldsymbol{\gamma}_{1, l}) \cdot \text{Attention}(\text{LN}(\mathbf{x}_l))$$
-  $$\mathbf{x}_{l+1} = \mathbf{x}'_l + \text{diag}(\boldsymbol{\gamma}_{2, l}) \cdot \text{SwiGLU}(\text{LN}(\mathbf{x}'_l))$$
-  Giúp hạn chế hiện tượng bão hòa tín hiệu khi xếp chồng nhiều khối spatial transformer.
+* **Cơ chế**: Khởi tạo vector tỉ lệ đường chéo `gamma` với giá trị nhỏ (`1e-5`) cho mỗi khối Attention và MLP trước khi cộng residual:
+  ```python
+  x = x + gamma_1 * Attention(LayerNorm(x))
+  x = x + gamma_2 * SwiGLU(LayerNorm(x))
+  ```
+  Giúp kiểm soát biên độ kích hoạt và ngăn chặn hiện tượng bão hòa tín hiệu khi xếp chồng nhiều khối spatial transformer.
 
 ---
 
@@ -64,7 +75,7 @@ Khối mã hóa không gian mới được xây dựng tại [`models/TSViT/dino
 | File | Vai trò | Chi tiết thay đổi |
 |---|---|---|
 | [`models/TSViT/dinov3.py`](models/TSViT/dinov3.py) | **DINO-v3 Engine** | Hiện thực `DINOv3RoPE`, `DINOv3LayerScale`, `DINOv3GatedMLP`, `DINOv3Attention`, `DINOv3SpatialEncoder`. |
-| [`models/TSViT/TSViTdense.py`](models/TSViT/TSViTdense.py) | **Mô hình Phân đoạn (Segmentation)** | Thay `self.space_transformer` thành `DINOv3SpatialEncoder`. Truyền kích thước lưới $(H_p, W_p)$ vào RoPE trong hàm `forward`. Thêm class `TSViT_DINOv3`. |
+| [`models/TSViT/TSViTdense.py`](models/TSViT/TSViTdense.py) | **Mô hình Phân đoạn (Segmentation)** | Thay `self.space_transformer` thành `DINOv3SpatialEncoder`. Truyền kích thước lưới `(Hp, Wp)` vào RoPE trong hàm `forward`. Thêm class `TSViT_DINOv3`. |
 | [`models/TSViT/TSViTcls.py`](models/TSViT/TSViTcls.py) | **Mô hình Phân loại (Classification)** | Tích hợp `DINOv3SpatialEncoder` với cơ chế bảo toàn `[CLS]` space token (`has_cls_token=True`). Thêm class `TSViTcls_DINOv3`. |
 | [`models/__init__.py`](models/__init__.py) | **Model Dispatcher** | Định tuyến khởi tạo mô hình khi cấu hình yêu cầu `TSViT_DINOv3` hoặc `spatial_backbone: "dinov3"`. |
 | [`configs/PASTIS24/TSViT_DINOv3_fold1.yaml`](configs/PASTIS24/TSViT_DINOv3_fold1.yaml) | **Cấu hình huấn luyện** | Cấu hình mẫu cho bài toán phân đoạn PASTIS-24 sử dụng backbone DINO-v3. |
