@@ -136,6 +136,12 @@ In the baseline TSViT architecture:
 
 ### 3.2 DINO-v3 Architectural Engine
 
+<p align="center">
+  <img src="figures/tsvit-dinov3-spatial.png" alt="TSViT-DINOv3 Integrated Architecture" width="850"/>
+  <br>
+  <em>Figure 2: Architecture of TSViT-DINOv3 after replacing the vanilla Spatial Transformer with the DINO-v3 Vision Backbone. Features from the Temporal Transformer undergo linear projection ($d \to D$), dynamic [CLS] and register token concatenation, ViT blocks with 2D Axial RoPE self-attention, and token filtering before reaching the dense segmentation head.</em>
+</p>
+
 Our integration implements the core mathematical modules of Meta's DINO-v3 inside [`models/TSViT/dinov3.py`](models/TSViT/dinov3.py):
 
 ```
