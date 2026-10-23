@@ -79,7 +79,13 @@ While standard TSViT factorizes time and space into two sequential transformer s
 
 ### 2.1 SITS Factored Architecture
 
-In satellite image time series, attention across both space and time naively exhibits quadratic complexity $O((T \cdot H \cdot W)^2)$, which is computationally prohibitive for $T = 60$ and $H \times W = 24 \times 24$. TSViT factorizes this problem into:
+In satellite image time series, attention across both space and time naively exhibits quadratic complexity $O((T \cdot H \cdot W)^2)$, which is computationally prohibitive for $T = 60$ and $H \times W = 24 \times 24$. TSViT factorizes this problem into two sequential attention mechanisms: temporal self-attention across acquisition dates followed by spatial self-attention across patches.
+
+<p align="center">
+  <img src="figures/tsvit-baseline.png" alt="Original TSViT Architecture" width="850"/>
+  <br>
+  <em>Figure 1: Original Temporal-Spatial Vision Transformer (TSViT) architecture from Tarasiou et al. (CVPR 2023), illustrating the decoupled temporal encoder, class-token extraction, vanilla spatial encoder with 1D positional embeddings, and dense pixel-level reconstruction head.</em>
+</p>
 
 $$
 X \xrightarrow{\text{Temporal Transformer}} Z_{\text{temp}} \xrightarrow{\text{DINO-v3 Spatial Backbone}} Z_{\text{spatial}} \xrightarrow{\text{Segmentation Head}} \hat{Y}
