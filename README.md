@@ -85,26 +85,6 @@ $$
 X \xrightarrow{\text{Temporal Transformer}} Z_{\text{temp}} \xrightarrow{\text{DINO-v3 Spatial Backbone}} Z_{\text{spatial}} \xrightarrow{\text{Segmentation Head}} \hat{Y}
 $$
 
-```
-Multi-Temporal Satellite Tensor: (B, T=60, C=11, H=24, W=24)
-              │
-              ▼  [Patch Partitioning & DOY Embedding: P=2 -> 144 patches]
-         (B * 144, T=60, Dim=128)
-              │
-              ▼  [Temporal Transformer: Attention across T=60 acquisition dates]
-         (B * NumClasses=19, N_patches=144, Dim=128)
-              │
-    ┌──────────┴────────────────────────────────────────────────────────┐
-    │              DINO-v3 SPATIAL BACKBONE (Ours)                      │
-    │  • 2D Axial RoPE: Analytical 2D spatial rotation on Q and K       │
-    │  • LayerScale: Diagonal weights (gamma = 1e-5) for stability      │
-    │  • SwiGLU Gated-MLP: SiLU(xW_gate) * (xW_up) @ W_down             │
-    └──────────┬────────────────────────────────────────────────────────┘
-              │
-              ▼  [Dense Segmentation Head: Dim 128 -> P^2 = 4 pixels]
-         Output Logits: (B, NumClasses=19, H=24, W=24)
-```
-
 ### 2.2 PASTIS-24 Satellite Data Pipeline
 
 The **PASTIS-24** dataset provides multi-spectral time series from Sentinel-2 over agricultural regions in France:
@@ -136,32 +116,7 @@ In the baseline TSViT architecture:
   <em>Figure 2: Architecture of TSViT-DINOv3 after replacing the vanilla Spatial Transformer with the DINO-v3 Vision Backbone. Features from the Temporal Transformer undergo linear projection ($d \to D$), dynamic [CLS] and register token concatenation, ViT blocks with 2D Axial RoPE self-attention, and token filtering before reaching the dense segmentation head.</em>
 </p>
 
-Our integration implements the core mathematical modules of Meta's DINO-v3 inside [`models/TSViT/dinov3.py`](models/TSViT/dinov3.py):
-
-```
-       DINO-v3 Spatial Block (DINOv3Block)
-  ┌──────────────────────────────────────────────┐
-  │  Input x                                     │
-  │   │                                          │
-  │   ├──> LayerNorm ─────────────────────────┐  │
-  │   │                                       ▼  │
-  │   │    2D Axial RoPE Attention (q_rot, k_rot)│
-  │   │                                       │  │
-  │   │    LayerScale 1 (gamma = 1e-5) <──────┘  │
-  │   ▼                                          │
-  │  (+) Residual Addition                       │
-  │   │                                          │
-  │   ├──> LayerNorm ─────────────────────────┐  │
-  │   │                                       ▼  │
-  │   │    SwiGLU Gated-MLP (SiLU Gating)        │
-  │   │                                       │  │
-  │   │    LayerScale 2 (gamma = 1e-5) <──────┘  │
-  │   ▼                                          │
-  │  (+) Residual Addition                       │
-  │   │                                          │
-  │   ▼ Output x_out                             │
-  └──────────────────────────────────────────────┘
-```
+Our integration implements the core mathematical modules of Meta's DINO-v3 inside [`models/TSViT/dinov3.py`](models/TSViT/dinov3.py): each spatial block incorporates pre-LayerNorm, 2D Axial RoPE multi-head attention, LayerScale diagonal weighting ($\gamma = 10^{-5}$), and a SwiGLU Gated Feed-Forward network.
 
 ### 3.3 Mathematical Formulation of DINO-v3 Components
 
@@ -562,13 +517,10 @@ In agricultural SITS, field boundaries are often misclassified by vanilla ViTs d
 
 A key technical distinction exists between two paradigms for integrating DINO-v3 into satellite time series:
 
-```
-Approach 1: Naive Input Patch-Embedding Substitution
-  Satellite (10 Bands) ──[Discard 7 Bands]──> RGB ──[Upsample 24x24 -> 192x192]──> Frozen DINOv3 ──> Projection ──> TSViT
-
-Approach 2: Full Spatial Transformer Backbone Replacement (TSViT-DINOv3 - Ours)
-  Satellite (10 Bands + DOY) ──> Full Spectral Patchify (Linear 40->128) ──> Temporal ViT (T=60) ──> DINO-v3 SPATIAL BACKBONE
-```
+- **Approach 1 (Front-End Input Patch-Embedding Substitution)**:
+  $$\text{Satellite (10 Bands)} \xrightarrow{\text{Discard 7 Bands}} \text{RGB} \xrightarrow{\text{Upsample } 24 \to 192} \text{Frozen DINOv3} \xrightarrow{\text{Projection}} \text{TSViT}$$
+- **Approach 2 (Full Spatial Transformer Backbone Replacement - Ours)**:
+  $$\text{Satellite (10 Bands + DOY)} \xrightarrow{\text{Patch Embedding}} \text{Temporal ViT} \xrightarrow{\text{DINO-v3 Spatial Backbone}} \text{Segmentation Head}$$
 
 ### Why Spatial Backbone Replacement is Superior for SITS:
 1. **Preserves Native Multispectral Calibration**: Sentinel-2 provides 10 physical reflectance bands critical for vegetation indices (e.g., Red Edge bands B05–B07, NIR B08, SWIR B11–B12). Discarding 7 bands to fit an RGB backbone loses essential physiological crop signals.
