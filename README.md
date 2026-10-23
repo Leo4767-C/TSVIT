@@ -94,8 +94,9 @@ The **PASTIS-24** dataset provides multi-spectral time series from Sentinel-2 ov
 $$
 \text{DOY}_{\text{embed}} = \text{Linear}_{366 \to D}(\text{OneHot}(\lfloor 365.0001 \cdot t_{\text{doy}} \rfloor))
 $$
+
 - **19 Crop Classes**: Meadow, Soft winter wheat, Corn, Winter barley, Winter rapeseed, Spring barley, Sunflower, Grapevine, Beet, Soy, etc.
-- **Void Label (19)**: Designates non-crop surfaces, roads, urban structures, and water bodies. A binary mask $M \in \{0, 1\}$ is generated on-the-fly where $M_{b, i, j} = \mathbb{I}(Y_{b, i, j} \neq 19)$.
+- **Void Label (19)**: Designates non-crop surfaces, roads, urban structures, and water bodies. A dynamic binary validity mask $M \in \{0, 1\}$ is generated on-the-fly where $M = 1$ for valid crop labels ($Y \in [0, 18]$) and $M = 0$ for void background ($Y = 19$).
 
 ---
 
@@ -104,9 +105,18 @@ $$
 ### 3.1 Limitations of Vanilla Spatial TSViT
 
 In the baseline TSViT architecture:
-1. **1D Static Positional Vectors (`space_pos_embedding`)**: Patch coordinates $(y, x)$ on a $12 \times 12$ grid are flattened to indices $0 \dots 143$. A learnable 1D parameter $\mathbf{E}_{\text{pos}} \in \mathbb{R}^{1 \times 144 \times D}$ is added directly to features. This destroys metric 2D distance relationships ($\| (y_1, x_1) - (y_2, x_2) \|_2$) and fails to generalize under parcel spatial translations.
-2. **Standard GELU Feed-Forward Networks**: Conventional MLPs rely on static activation thresholds $\text{GELU}(x W_1) W_2$, which exhibit gradient saturation in deep feature regimes.
-3. **Absence of Residual Scaling**: In deep Vision Transformers, backpropagation updates to residual branches $x_{l+1} = x_l + f(x_l)$ accumulate without scaling, leading to feature variance explosion.
+
+1. **1D Static Positional Vectors (`space_pos_embedding`)**: Patch coordinates $(y, x)$ on a $12 \times 12$ grid are flattened to indices $0 \dots 143$. A learnable 1D parameter vector $\mathbf{E} \in \mathbb{R}^{1 \times 144 \times D}$ is added directly to features, destroying 2D Euclidean distance relationships and failing to generalize under parcel spatial translations.
+
+2. **Standard GELU Feed-Forward Networks**: Conventional MLPs rely on static activation thresholds $\text{GELU}(x W^{(1)}) W^{(2)}$, which exhibit gradient saturation in deep feature regimes.
+
+3. **Absence of Residual Scaling**: In deep Vision Transformers, backpropagation residual updates accumulate without scaling:
+
+$$
+x_{l+1} = x_l + f(x_l)
+$$
+
+This causes representation and gradient variance explosion across deep spatial layers.
 
 ### 3.2 DINO-v3 Architectural Engine
 
@@ -122,7 +132,11 @@ Our integration implements the core mathematical modules of Meta's DINO-v3 insid
 
 #### 1. 2D Axial Rotary Position Embedding (`DINOv3RoPE`)
 
-For each attention head of dimension $d_{\text{head}}$, we partition the feature channels into two equal halves: $d_h = d_{\text{head}} / 2$ for the vertical axis (rows) and $d_w = d_{\text{head}} / 2$ for the horizontal axis (columns).
+For each attention head of dimension 32, feature channels are partitioned equally into vertical and horizontal components (16 rows, 16 columns):
+
+$$
+d_h = \frac{d_{\text{head}}}{2}, \qquad d_w = \frac{d_{\text{head}}}{2}
+$$
 
 Frequencies along each axis are computed with base $\theta = 100.0$:
 
@@ -134,7 +148,7 @@ $$
 \omega_{w, j} = \theta^{-2j / d_w}, \quad 0 \le j < \frac{d_w}{2}
 $$
 
-For a patch token located at grid coordinates $(y, x) \in [0, H_p - 1] \times [0, W_p - 1]$, the 2D rotary representation $\mathbf{R}_{2D}(y, x)$ rotates the query vector $q \in \mathbb{R}^{d_{\text{head}}}$:
+For a patch token located at grid coordinates $(y, x)$ on the $12 \times 12$ patch grid, the 2D rotary representation $\mathbf{R}(y, x)$ rotates the query vector $q$:
 
 $$
 q_{\text{rot}}(y, x) = 
@@ -144,23 +158,27 @@ q_{[d_h:d_{\text{head}}]} \odot \cos(x \cdot \omega_w) + \text{RotHalf}(q_{[d_h:
 \end{pmatrix}
 $$
 
-where $\text{RotHalf}(z) = [-z_{d/2:d}, z_{0:d/2}]$ denotes the half-vector rotation operator (implemented in [`DINOv3RoPE.rotate_half`](models/TSViT/dinov3.py#L60)).
+where the half-vector rotation operator (implemented in [`DINOv3RoPE.rotate_half`](models/TSViT/dinov3.py#L60)) is defined as:
+
+$$
+\text{RotHalf}(z) = \left[ -z_{\frac{d}{2}:d}, \; z_{0:\frac{d}{2}} \right]
+$$
 
 **Relative Translation Invariance Proof**:  
-The attention logit between patch 1 at $(y_1, x_1)$ and patch 2 at $(y_2, x_2)$ is:
+The attention logit between patch 1 and patch 2 evaluates to:
 
 $$
 \langle q_{\text{rot}}(y_1, x_1), k_{\text{rot}}(y_2, x_2) \rangle = q^T \mathbf{R}_{2D}^T(y_1, x_1) \mathbf{R}_{2D}(y_2, x_2) k = q^T \mathbf{R}_{2D}(y_1 - y_2, x_1 - x_2) k
 $$
 
-The attention depends strictly on the spatial displacement vector $(\Delta y, \Delta x) = (y_1 - y_2, x_1 - x_2)$, granting true 2D spatial translation equivariance across agricultural parcel boundaries.
+The attention depends strictly on the spatial displacement vector $(\Delta y, \Delta x)$, granting true 2D spatial translation equivariance across agricultural parcel boundaries.
 
 #### 2. SwiGLU Gated Feed-Forward Network (`DINOv3GatedMLP`)
 
-Standard Feed-Forward Networks use $\text{FFN}(x) = \text{GELU}(x W_1) W_2$. In DINO-v3, we deploy the SwiGLU architecture with three projection matrices $W_{\text{gate}}, W_{\text{up}} \in \mathbb{R}^{D \times D_{\text{mlp}}}$ and $W_{\text{down}} \in \mathbb{R}^{D_{\text{mlp}} \times D}$:
+Standard Feed-Forward Networks use $\text{FFN}(x) = \text{GELU}(x W^{(1)}) W^{(2)}$. In DINO-v3, we deploy the SwiGLU architecture with learned gating and projection matrices:
 
 $$
-\text{SwiGLU}(x) = \left( \text{SiLU}(x W_{\text{gate}}) \odot (x W_{\text{up}}) \right) W_{\text{down}}
+\text{SwiGLU}(x) = \left( \text{SiLU}(x W_{\text{gate}}) \odot (x W_{\text{up}}) \right) W_{\text{down}}, \quad \text{where } W_{\text{gate}}, W_{\text{up}} \in \mathbb{R}^{D \times D_{\text{mlp}}}, \; W_{\text{down}} \in \mathbb{R}^{D_{\text{mlp}} \times D}
 $$
 
 where $\text{SiLU}(z) = z \cdot \sigma(z) = \frac{z}{1 + e^{-z}}$. The gating mechanism dynamically controls information flow through multiplicative interaction, avoiding dying neurons.
@@ -173,7 +191,7 @@ $$
 x_{l+1} = x_l + \text{diag}(\gamma_l) \cdot f(x_l), \quad \gamma_l \in \mathbb{R}^D, \quad \text{with initial } \gamma_l = 10^{-5}
 $$
 
-Since $\gamma \approx 0$ at initialization, each DINO-v3 block acts essentially as an identity operator ($x_{l+1} \approx x_l$). This eliminates representation shock when restoring pretrained weights (`partial_restore: True`).
+Since $\gamma \approx 0$ at initialization, each DINO-v3 block acts essentially as an identity operator ($x \approx x$). This eliminates representation shock when restoring pretrained weights (`partial_restore: True`).
 
 ---
 
@@ -191,7 +209,7 @@ The following table traces the transformation of tensors through each stage of `
 | **6** | Temporal Tokens | `(1, 19, 128)` | `(B * 144, 19 + 60, 128)` | Prepend $K=19$ learnable class tokens to the temporal sequence length: $T' = 79$. |
 | **7** | Temporal ViT | `temporal_transformer` | `(B * 144, 19, 128)` | 4 Transformer blocks with temporal self-attention; extracts class token outputs `[:, :19]`. |
 | **8** | Spatial Rearrange | Permute & Rearrange | `(B * 19, 144, 128)` | Regroups tokens so that for each class $k \in \{0 \dots 18\}$, all 144 spatial patches form a grid. |
-| **9** | **DINO-v3 Backbone** | [`DINOv3SpatialEncoder`](models/TSViT/dinov3.py#L167) | `(B * 19, 144, 128)` | 4 DINO-v3 blocks: 2D RoPE rotation ($H_p=W_p=12$), LayerScale ($\gamma=10^{-5}$), SwiGLU MLP. |
+| **9** | **DINO-v3 Backbone** | [`DINOv3SpatialEncoder`](models/TSViT/dinov3.py#L167) | `(B * 19, 144, 128)` | 4 DINO-v3 blocks: 2D RoPE rotation (12 × 12 grid), LayerScale ($\gamma=10^{-5}$), SwiGLU MLP. |
 | **10** | Segmentation Head | `mlp_head` | `(B * 19, 144, 4)` | `nn.LayerNorm(128)` $\to$ `nn.Linear(128, 4)` projecting each patch embedding to $P^2 = 4$ pixels. |
 | **11** | Dense Logit Fold | Rearrange | `(B, 19, 24, 24)` | Reshapes patches $12 \times 12$ and sub-pixels $2 \times 2$ into full spatial resolution dense logits. |
 
@@ -238,25 +256,32 @@ M_{b, i, j} =
 \end{cases}
 $$
 
-The Masked Cross-Entropy Loss evaluates only over the valid pixel set $\mathcal{V} = \{(b, i, j) \mid M_{b, i, j} = 1\}$:
+The Masked Cross-Entropy Loss evaluates strictly over valid agricultural parcel pixels where $M = 1$:
 
 $$
-\mathcal{L}_{\text{MCE}}(\hat{Y}, Y, M) = - \frac{1}{\sum_{b, i, j} M_{b, i, j}} \sum_{b=1}^B \sum_{i=1}^H \sum_{j=1}^W M_{b, i, j} \sum_{c=0}^{K-1} \mathbb{I}(Y_{b, i, j} = c) \log \left( \frac{\exp(\hat{Y}_{b, i, j, c})}{\sum_{c'=0}^{K-1} \exp(\hat{Y}_{b, i, j, c'})} \right)
+\mathcal{L}_{\text{MCE}}(\hat{Y}, Y, M) = - \frac{1}{\sum_{b, i, j} M_{b, i, j}} \sum_{b=1}^B \sum_{i=1}^H \sum_{j=1}^W M_{b, i, j} \sum_{c=0}^{K-1} I(Y_{b, i, j} = c) \log \left( \frac{\exp(\hat{Y}_{b, i, j, c})}{\sum_{c'=0}^{K-1} \exp(\hat{Y}_{b, i, j, c'})} \right)
 $$
 
 ### 4.2 Analytical Gradient Derivation & Void Mask Behavior
 
-Let $p_{b, i, j, c} = \text{Softmax}(\hat{Y}_{b, i, j})_c$ denote the predicted probability for class $c$. The exact analytical gradient with respect to class logit $\hat{Y}_{b, i, j, k}$ is:
+Let the predicted class probability at pixel $(b, i, j)$ be:
 
 $$
-\frac{\partial \mathcal{L}_{\text{MCE}}}{\partial \hat{Y}_{b, i, j, k}} = \frac{M_{b, i, j}}{N_{\text{valid}}} \left( p_{b, i, j, k} - \mathbb{I}(Y_{b, i, j} = k) \right), \quad \text{where } N_{\text{valid}} = \sum_{b, i, j} M_{b, i, j}
+p_{b, i, j, c} = \text{Softmax}(\hat{Y}_{b, i, j})_c
+$$
+
+The exact analytical gradient with respect to class logit $k$ is:
+
+$$
+\frac{\partial \mathcal{L}_{\text{MCE}}}{\partial \hat{Y}_{b, i, j, k}} = \frac{M_{b, i, j}}{N_{\text{valid}}} \left( p_{b, i, j, k} - I(Y_{b, i, j} = k) \right), \quad \text{where } N_{\text{valid}} = \sum_{b, i, j} M_{b, i, j}
 $$
 
 **Critical Gradient Property**:
 
 $$
-\text{If } M_{b, i, j} = 0 \implies \frac{\partial \mathcal{L}_{\text{MCE}}}{\partial \hat{Y}_{b, i, j, k}} \equiv 0.0, \quad \forall k \in [0, K-1]
+M_{b, i, j} = 0 \implies \frac{\partial \mathcal{L}_{\text{MCE}}}{\partial \hat{Y}_{b, i, j, k}} \equiv 0.0, \quad \forall k \in [0, K-1]
 $$
+
 Non-crop background and invalid pixels emit identically zero gradient, preventing background noise from corrupting model weights during backpropagation.
 
 Implementation in [`metrics/loss_functions.py:MaskedCrossEntropyLoss`](metrics/loss_functions.py#L141-L188):
@@ -304,7 +329,7 @@ $$
    The small diagonal parameter $\gamma = 10^{-5}$ acts as an inductive gradient damper, protecting deep spatial transformer representations from gradient explosions during early training epochs.
 
 3. **Lossless Gradient Flow via Orthogonal 2D RoPE**:  
-   Because the 2D rotary matrix $\mathbf{R}_{2D}$ is unitary ($\mathbf{R}_{2D}^T \mathbf{R}_{2D} = \mathbf{I}$), rotation is an isometry that preserves the Frobenius norm:
+   Because the 2D rotary matrix $\mathbf{R}$ is unitary ($\mathbf{R}^T \mathbf{R} = \mathbf{I}$), rotation is an isometry that preserves the Frobenius norm:
 
 $$
 \| \nabla_q \mathcal{L} \|_F = \| \nabla_{q_{\text{rot}}} \mathcal{L} \|_F
@@ -338,15 +363,15 @@ $$
 \theta_t = \theta_{t-1} - \eta_t \left( \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon} + \lambda \theta_{t-1} \right)
 $$
 
-where $\lambda = 0.0$ (or $0.01$), $\beta_1 = 0.9$, $\beta_2 = 0.999$, $\epsilon = 10^{-8}$.
+where $\lambda = 0.0$ (or $0.01$), $\beta = (0.9, 0.999)$, $\epsilon = 10^{-8}$.
 * **Cosine Annealing with Linear Warmup**:
-  * **Warmup Phase (Epochs 1–10)**: Linear learning rate ramp from $\eta_{\text{start}} = 10^{-8}$ to $\eta_{\text{base}} = 10^{-3}$:
+  * **Warmup Phase (Epochs 1–10)**: Linear learning rate ramp from $10^{-8}$ to peak rate $10^{-3}$:
 
 $$
 \eta_t = \eta_{\text{start}} + \frac{t}{T_{\text{warmup}}} (\eta_{\text{base}} - \eta_{\text{start}})
 $$
 
-  * **Cosine Annealing Phase (Epochs 11–100)**: Smooth cosine descent from $10^{-3}$ to $\eta_{\text{min}} = 5 \times 10^{-6}$ over 80,000 steps:
+  * **Cosine Annealing Phase (Epochs 11–100)**: Smooth cosine descent from $10^{-3}$ to minimum rate $5 \times 10^{-6}$ over 80,000 steps:
 
 $$
 \eta_t = \eta_{\text{min}} + \frac{1}{2}(\eta_{\text{base}} - \eta_{\text{min}}) \left( 1 + \cos\left( \frac{t - T_{\text{warmup}}}{T_{\text{total}} - T_{\text{warmup}}} \pi \right) \right)
@@ -507,8 +532,8 @@ In agricultural SITS, field boundaries are often misclassified by vanilla ViTs d
 |---|---|---|
 | `CUDA out of memory` during training | Large batch size with long time series ($T=60$). | Reduce `DATASETS.train.batch_size` in YAML (e.g. from 48 to 16 or 24), or enable multi-GPU `--device 0,1`. |
 | `Missing key(s) in state_dict: space_transformer...` | Mismatch between baseline checkpoint keys and DINO-v3 spatial module. | Ensure `CHECKPOINT.partial_restore: True` is set in the configuration file. |
-| `RuntimeError: The size of tensor a must match size of tensor b` | Grid dimension mismatch in 2D RoPE cache. | Verify `img_res` (24) is evenly divisible by `patch_size` (2), producing $H_p = W_p = 12$. |
-| `ValueError: no valid target pixels for mean reduction` | Batch contains only non-crop background or cloud pixels ($M_{b, i, j} = 0$). | Expected behavior for fully void tiles; ensure dataset splits contain valid agricultural parcel annotations. |
+| `RuntimeError: The size of tensor a must match size of tensor b` | Grid dimension mismatch in 2D RoPE cache. | Verify `img_res` (24) is evenly divisible by `patch_size` (2), producing a 12 × 12 patch grid. |
+| `ValueError: no valid target pixels for mean reduction` | Batch contains only non-crop background or cloud pixels (validity mask $M = 0$). | Expected behavior for fully void tiles; ensure dataset splits contain valid agricultural parcel annotations. |
 | Slow DataLoader throughput | Low `num_workers` causing GPU starvation. | Set `DATASETS.train.num_workers: 4` or `8` to enable asynchronous multi-process tile loading. |
 
 ---
