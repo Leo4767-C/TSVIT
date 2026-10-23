@@ -81,7 +81,9 @@ While standard TSViT factorizes time and space into two sequential transformer s
 
 In satellite image time series, attention across both space and time naively exhibits quadratic complexity $O((T \cdot H \cdot W)^2)$, which is computationally prohibitive for $T = 60$ and $H \times W = 24 \times 24$. TSViT factorizes this problem into:
 
-$$\text{Input } X \in \mathbb{R}^{B \times T \times C \times H \times W} \xrightarrow{\text{Temporal Encoder}} Z_{\text{temp}} \in \mathbb{R}^{(B \cdot K) \times N_p \times D} \xrightarrow{\text{Spatial Encoder}} Z_{\text{spatial}} \xrightarrow{\text{Head}} \hat{Y} \in \mathbb{R}^{B \times K \times H \times W}$$
+$$
+X \xrightarrow{\text{Temporal Transformer}} Z_{\text{temp}} \xrightarrow{\text{DINO-v3 Spatial Backbone}} Z_{\text{spatial}} \xrightarrow{\text{Segmentation Head}} \hat{Y}
+$$
 
 ```
 Multi-Temporal Satellite Tensor: (B, T=60, C=11, H=24, W=24)
@@ -108,7 +110,10 @@ Multi-Temporal Satellite Tensor: (B, T=60, C=11, H=24, W=24)
 The **PASTIS-24** dataset provides multi-spectral time series from Sentinel-2 over agricultural regions in France:
 - **10 Reflectance Bands**: B02 (Blue), B03 (Green), B04 (Red), B05–B07 (Red Edge), B08 (NIR), B8A (Narrow NIR), B11–B12 (SWIR).
 - **Day of Year (DOY)**: Encoded as the 11th channel ($C=11$), normalized to $[0, 1]$ and mapped to a 366-dimensional sinusoidal embedding:
-  $$\text{DOY}_{\text{embed}} = \text{Linear}_{366 \to D}(\text{OneHot}(\lfloor 365.0001 \cdot t_{\text{doy}} \rfloor))$$
+
+$$
+\text{DOY}_{\text{embed}} = \text{Linear}_{366 \to D}(\text{OneHot}(\lfloor 365.0001 \cdot t_{\text{doy}} \rfloor))
+$$
 - **19 Crop Classes**: Meadow, Soft winter wheat, Corn, Winter barley, Winter rapeseed, Spring barley, Sunflower, Grapevine, Beet, Soy, etc.
 - **Void Label (19)**: Designates non-crop surfaces, roads, urban structures, and water bodies. A binary mask $M \in \{0, 1\}$ is generated on-the-fly where $M_{b, i, j} = \mathbb{I}(Y_{b, i, j} \neq 19)$.
 
@@ -159,32 +164,53 @@ Our integration implements the core mathematical modules of Meta's DINO-v3 insid
 For each attention head of dimension $d_{\text{head}}$, we partition the feature channels into two equal halves: $d_h = d_{\text{head}} / 2$ for the vertical axis (rows) and $d_w = d_{\text{head}} / 2$ for the horizontal axis (columns).
 
 Frequencies along each axis are computed with base $\theta = 100.0$:
-$$\omega_{h, i} = \theta^{-2i / d_h}, \quad i \in \left\{0, 1, \dots, \frac{d_h}{2} - 1\right\}$$
-$$\omega_{w, j} = \theta^{-2j / d_w}, \quad j \in \left\{0, 1, \dots, \frac{d_w}{2} - 1\right\}$$
+
+$$
+\omega_{h, i} = \theta^{-2i / d_h}, \quad 0 \le i < \frac{d_h}{2}
+$$
+
+$$
+\omega_{w, j} = \theta^{-2j / d_w}, \quad 0 \le j < \frac{d_w}{2}
+$$
 
 For a patch token located at grid coordinates $(y, x) \in [0, H_p - 1] \times [0, W_p - 1]$, the 2D rotary representation $\mathbf{R}_{2D}(y, x)$ rotates the query vector $q \in \mathbb{R}^{d_{\text{head}}}$:
 
-$$q_{\text{rot}}(y, x) = \begin{pmatrix} q_{[0:d_h]} \odot \cos(y \cdot \omega_h) + \text{rotate\_half}(q_{[0:d_h]}) \odot \sin(y \cdot \omega_h) \\ q_{[d_h:d_{\text{head}}]} \odot \cos(x \cdot \omega_w) + \text{rotate\_half}(q_{[d_h:d_{\text{head}}]}) \odot \sin(x \cdot \omega_w) \end{pmatrix}$$
+$$
+q_{\text{rot}}(y, x) = 
+\begin{pmatrix} 
+q_{[0:d_h]} \odot \cos(y \cdot \omega_h) + \text{RotHalf}(q_{[0:d_h]}) \odot \sin(y \cdot \omega_h) \\ 
+q_{[d_h:d_{\text{head}}]} \odot \cos(x \cdot \omega_w) + \text{RotHalf}(q_{[d_h:d_{\text{head}}]}) \odot \sin(x \cdot \omega_w) 
+\end{pmatrix}
+$$
 
-where $\text{rotate\_half}(z) = [-z_{d/2:d}, z_{0:d/2}]$.
+where $\text{RotHalf}(z) = [-z_{d/2:d}, z_{0:d/2}]$ denotes the half-vector rotation operator (implemented in [`DINOv3RoPE.rotate_half`](models/TSViT/dinov3.py#L60)).
 
 **Relative Translation Invariance Proof**:  
 The attention logit between patch 1 at $(y_1, x_1)$ and patch 2 at $(y_2, x_2)$ is:
-$$\langle q_{\text{rot}}(y_1, x_1), k_{\text{rot}}(y_2, x_2) \rangle = q^T \mathbf{R}_{2D}^T(y_1, x_1) \mathbf{R}_{2D}(y_2, x_2) k = q^T \mathbf{R}_{2D}(y_1 - y_2, x_1 - x_2) k$$
+
+$$
+\langle q_{\text{rot}}(y_1, x_1), k_{\text{rot}}(y_2, x_2) \rangle = q^T \mathbf{R}_{2D}^T(y_1, x_1) \mathbf{R}_{2D}(y_2, x_2) k = q^T \mathbf{R}_{2D}(y_1 - y_2, x_1 - x_2) k
+$$
+
 The attention depends strictly on the spatial displacement vector $(\Delta y, \Delta x) = (y_1 - y_2, x_1 - x_2)$, granting true 2D spatial translation equivariance across agricultural parcel boundaries.
 
 #### 2. SwiGLU Gated Feed-Forward Network (`DINOv3GatedMLP`)
 
 Standard Feed-Forward Networks use $\text{FFN}(x) = \text{GELU}(x W_1) W_2$. In DINO-v3, we deploy the SwiGLU architecture with three projection matrices $W_{\text{gate}}, W_{\text{up}} \in \mathbb{R}^{D \times D_{\text{mlp}}}$ and $W_{\text{down}} \in \mathbb{R}^{D_{\text{mlp}} \times D}$:
 
-$$\text{SwiGLU}(x) = \left( \text{SiLU}(x W_{\text{gate}}) \odot (x W_{\text{up}}) \right) W_{\text{down}}$$
+$$
+\text{SwiGLU}(x) = \left( \text{SiLU}(x W_{\text{gate}}) \odot (x W_{\text{up}}) \right) W_{\text{down}}
+$$
 
 where $\text{SiLU}(z) = z \cdot \sigma(z) = \frac{z}{1 + e^{-z}}$. The gating mechanism dynamically controls information flow through multiplicative interaction, avoiding dying neurons.
 
 #### 3. LayerScale Stabilization (`DINOv3LayerScale`)
 
 Deep ViT residual updates are modulated by a learned diagonal tensor $\gamma \in \mathbb{R}^D$:
-$$x_{l+1} = x_l + \text{diag}(\gamma_l) \cdot f(x_l), \quad \gamma_l \in \mathbb{R}^D, \quad \text{initialized to } \gamma_l = 10^{-5}$$
+
+$$
+x_{l+1} = x_l + \text{diag}(\gamma_l) \cdot f(x_l), \quad \gamma_l \in \mathbb{R}^D, \quad \text{with initial } \gamma_l = 10^{-5}
+$$
 
 Since $\gamma \approx 0$ at initialization, each DINO-v3 block acts essentially as an identity operator ($x_{l+1} \approx x_l$). This eliminates representation shock when restoring pretrained weights (`partial_restore: True`).
 
@@ -243,20 +269,33 @@ out = self.mlp_head(x) # Output Shape: (B, 19)
 
 Agricultural satellite imagery includes clouds, atmospheric distortions, and non-agricultural backgrounds (roads, structures, water bodies) encoded as void label $19$. To ensure learning focuses purely on valid crop pixels, we define the binary validity mask $M$:
 
-$$M_{b, i, j} = \begin{cases} 1 & \text{if } Y_{b, i, j} \in \{0, 1, \dots, 18\} \\ 0 & \text{if } Y_{b, i, j} = 19 \text{ (void/background)} \end{cases}$$
+$$
+M_{b, i, j} = 
+\begin{cases} 
+1 & \text{if } Y_{b, i, j} \in [0, 18] \\ 
+0 & \text{if } Y_{b, i, j} = 19 \text{ (void/background)} 
+\end{cases}
+$$
 
 The Masked Cross-Entropy Loss evaluates only over the valid pixel set $\mathcal{V} = \{(b, i, j) \mid M_{b, i, j} = 1\}$:
 
-$$\mathcal{L}_{\text{MCE}}(\hat{Y}, Y, M) = - \frac{1}{\sum_{b, i, j} M_{b, i, j}} \sum_{b=1}^B \sum_{i=1}^H \sum_{j=1}^W M_{b, i, j} \sum_{c=0}^{K-1} \mathbb{I}(Y_{b, i, j} = c) \log \left( \frac{\exp(\hat{Y}_{b, i, j, c})}{\sum_{c'=0}^{K-1} \exp(\hat{Y}_{b, i, j, c'})} \right)$$
+$$
+\mathcal{L}_{\text{MCE}}(\hat{Y}, Y, M) = - \frac{1}{\sum_{b, i, j} M_{b, i, j}} \sum_{b=1}^B \sum_{i=1}^H \sum_{j=1}^W M_{b, i, j} \sum_{c=0}^{K-1} \mathbb{I}(Y_{b, i, j} = c) \log \left( \frac{\exp(\hat{Y}_{b, i, j, c})}{\sum_{c'=0}^{K-1} \exp(\hat{Y}_{b, i, j, c'})} \right)
+$$
 
 ### 4.2 Analytical Gradient Derivation & Void Mask Behavior
 
 Let $p_{b, i, j, c} = \text{Softmax}(\hat{Y}_{b, i, j})_c$ denote the predicted probability for class $c$. The exact analytical gradient with respect to class logit $\hat{Y}_{b, i, j, k}$ is:
 
-$$\frac{\partial \mathcal{L}_{\text{MCE}}}{\partial \hat{Y}_{b, i, j, k}} = \frac{M_{b, i, j}}{N_{\text{valid}}} \left( p_{b, i, j, k} - \mathbb{I}(Y_{b, i, j} = k) \right), \quad \text{where } N_{\text{valid}} = \sum_{b, i, j} M_{b, i, j}$$
+$$
+\frac{\partial \mathcal{L}_{\text{MCE}}}{\partial \hat{Y}_{b, i, j, k}} = \frac{M_{b, i, j}}{N_{\text{valid}}} \left( p_{b, i, j, k} - \mathbb{I}(Y_{b, i, j} = k) \right), \quad \text{where } N_{\text{valid}} = \sum_{b, i, j} M_{b, i, j}
+$$
 
 **Critical Gradient Property**:
-$$\text{If } M_{b, i, j} = 0 \implies \frac{\partial \mathcal{L}_{\text{MCE}}}{\partial \hat{Y}_{b, i, j, k}} \equiv 0.0, \quad \forall k \in \{0, \dots, K-1\}$$
+
+$$
+\text{If } M_{b, i, j} = 0 \implies \frac{\partial \mathcal{L}_{\text{MCE}}}{\partial \hat{Y}_{b, i, j, k}} \equiv 0.0, \quad \forall k \in [0, K-1]
+$$
 Non-crop background and invalid pixels emit identically zero gradient, preventing background noise from corrupting model weights during backpropagation.
 
 Implementation in [`metrics/loss_functions.py:MaskedCrossEntropyLoss`](metrics/loss_functions.py#L141-L188):
@@ -329,13 +368,24 @@ def train_step(net, sample, loss_fn, optimizer, device, loss_input_fn):
 #### Optimizer & Learning Rate Schedule Dynamics
 
 * **AdamW Optimizer**:
-  $$\theta_t = \theta_{t-1} - \eta_t \left( \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon} + \lambda \theta_{t-1} \right)$$
-  where $\lambda = 0.0$ (or $0.01$), $\beta_1 = 0.9$, $\beta_2 = 0.999$, $\epsilon = 10^{-8}$.
+
+$$
+\theta_t = \theta_{t-1} - \eta_t \left( \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon} + \lambda \theta_{t-1} \right)
+$$
+
+where $\lambda = 0.0$ (or $0.01$), $\beta_1 = 0.9$, $\beta_2 = 0.999$, $\epsilon = 10^{-8}$.
 * **Cosine Annealing with Linear Warmup**:
   * **Warmup Phase (Epochs 1–10)**: Linear learning rate ramp from $\eta_{\text{start}} = 10^{-8}$ to $\eta_{\text{base}} = 10^{-3}$:
-    $$\eta_t = \eta_{\text{start}} + \frac{t}{T_{\text{warmup}}} (\eta_{\text{base}} - \eta_{\text{start}})$$
+
+$$
+\eta_t = \eta_{\text{start}} + \frac{t}{T_{\text{warmup}}} (\eta_{\text{base}} - \eta_{\text{start}})
+$$
+
   * **Cosine Annealing Phase (Epochs 11–100)**: Smooth cosine descent from $10^{-3}$ to $\eta_{\text{min}} = 5 \times 10^{-6}$ over 80,000 steps:
-    $$\eta_t = \eta_{\text{min}} + \frac{1}{2}(\eta_{\text{base}} - \eta_{\text{min}}) \left( 1 + \cos\left( \frac{t - T_{\text{warmup}}}{T_{\text{total}} - T_{\text{warmup}}} \pi \right) \right)$$
+
+$$
+\eta_t = \eta_{\text{min}} + \frac{1}{2}(\eta_{\text{base}} - \eta_{\text{min}}) \left( 1 + \cos\left( \frac{t - T_{\text{warmup}}}{T_{\text{total}} - T_{\text{warmup}}} \pi \right) \right)
+$$
 
 ---
 
