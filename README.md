@@ -1,11 +1,5 @@
 # TSViT-DINOv3: Integrating DINO-v3 Spatial Backbone into Temporal-Spatial Vision Transformer
 
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-ee4c2c.svg?style=flat&logo=pytorch)](https://pytorch.org)
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg?style=flat&logo=python)](https://www.python.org/)
-[![License](https://img.shields.io/badge/License-Apache_2.0-green.svg)](LICENSE.txt)
-[![Benchmark](https://img.shields.io/badge/Benchmark-PASTIS--24-orange.svg)](https://github.com/VSainteuf/pastis-benchmark)
-[![Task](https://img.shields.io/badge/Task-SITS_Semantic_Segmentation_%26_Classification-purple.svg)](#1-project-overview--scope)
-
 This repository presents **TSViT-DINOv3**, an advanced architectural evolution of the **Temporal-Spatial Vision Transformer (TSViT)** for multi-temporal Satellite Image Time Series (SITS). 
 
 While standard TSViT factorizes time and space into two sequential transformer stages, its spatial encoder historically relied on a vanilla ViT equipped with 1D static learnable positional embeddings, standard GELU MLPs, and basic residual connections. In **TSViT-DINOv3**, we replace the vanilla spatial encoder with a custom-engineered **DINO-v3 Spatial Backbone**, introducing:
