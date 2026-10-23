@@ -321,37 +321,41 @@ loss = -torch.gather(log_probs, dim=1, index=masked_target).mean()
 
 ### 4.3 Gradient Flow & Backpropagation Through DINO-v3
 
-During backpropagation, gradients propagate backward from the scalar loss through all network layers:
+During backpropagation, gradients propagate backward from the scalar loss through the segmentation head, the DINO-v3 spatial backbone, and into the temporal transformer:
 
-```
-                  Loss L_MCE (Evaluated only where mask M = 1)
-                                      │
-                                      ▼  dL / dLogits = (p - Y) * (M / N_valid)
-                          Segmentation Head (Linear + LN)
-                                      │
-                                      ▼
-                      DINO-v3 SPATIAL BACKBONE GRADIENT FLOW
-  ┌────────────────────────────────────────────────────────────────────────┐
-  │ 1. SwiGLU Gated-MLP: Continuous gradient flow through both branches:   │
-  │    dL/dx = (dL/dOut * W_down^T) * [SiLU'(xW_gate) * (xW_up) * W_gate^T  │
-  │            + SiLU(xW_gate) * W_up^T]                                   │
-  │    (Continuous derivative prevents dying ReLU neurons completely)      │
-  │                                                                        │
-  │ 2. LayerScale: Gradient scaled by diagonal parameter gamma = 1e-5:     │
-  │    dL/df = gamma * (dL/dx)                                             │
-  │    (Prevents gradient explosion in deep spatial transformer blocks)    │
-  │                                                                        │
-  │ 3. 2D Axial RoPE Attention: Orthogonal rotation matrix (R^T R = I):    │
-  │    || dL/dq ||_F = || dL/dq_rot ||_F                                   │
-  │    (Strict norm preservation guarantees zero vanishing gradients)      │
-  └───────────────────────────────────┬────────────────────────────────────┘
-                                      │
-                                      ▼
-                        Temporal Transformer (Self-Attention)
-                                      │
-                                      ▼
-                        Patch Embeddings & DOY Encodings
-```
+<p align="center">
+  <img src="figures/gradient-flow-dinov3.png" alt="Gradient Flow Through the DINO-v3 Spatial Backbone" width="850"/>
+  <br>
+  <em>Figure 3: Analytical gradient flow through the DINO-v3 Spatial Backbone during backpropagation. The diagram illustrates how continuous non-linear gradients propagate through SwiGLU, LayerScale maintains residual stability via diagonal scaling ($\gamma = 10^{-5}$), and 2D Axial RoPE preserves the Frobenius norm of attention gradients ($\|\nabla_q \mathcal{L}\|_F = \|\nabla_{q_{\text{rot}}} \mathcal{L}\|_F$).</em>
+</p>
+
+#### Core Stability Mechanisms During Backpropagation:
+
+1. **Continuous Non-Linear Gradients (SwiGLU Gated-MLP)**:  
+   Gradients propagate through both the gating and up-projection paths:
+
+$$
+\frac{\partial \mathcal{L}}{\partial x} = \left(\frac{\partial \mathcal{L}}{\partial \text{Out}} W_{\text{down}}^T\right) \odot \left[ \text{SiLU}'(x W_{\text{gate}}) \odot (x W_{\text{up}}) W_{\text{gate}}^T + \text{SiLU}(x W_{\text{gate}}) W_{\text{up}}^T \right]
+$$
+
+   The continuous derivative $\text{SiLU}'(z) = \sigma(z) \cdot (1 + z(1 - \sigma(z)))$ remains non-zero across active ranges, completely preventing the "dying ReLU" neuron phenomenon.
+
+2. **Gradient Damping via LayerScale ($\gamma = 10^{-5}$)**:  
+
+$$
+\frac{\partial \mathcal{L}}{\partial f} = \gamma \odot \frac{\partial \mathcal{L}}{\partial x_{l+1}}
+$$
+
+   The small diagonal parameter $\gamma = 10^{-5}$ acts as an inductive gradient damper, protecting deep spatial transformer representations from gradient explosions during early training epochs.
+
+3. **Lossless Gradient Flow via Orthogonal 2D RoPE**:  
+   Because the 2D rotary matrix $\mathbf{R}_{2D}$ is unitary ($\mathbf{R}_{2D}^T \mathbf{R}_{2D} = \mathbf{I}$), rotation is an isometry that preserves the Frobenius norm:
+
+$$
+\| \nabla_q \mathcal{L} \|_F = \| \nabla_{q_{\text{rot}}} \mathcal{L} \|_F
+$$
+
+   This ensures zero vanishing gradients as spatial representations flow backward into the temporal self-attention blocks.
 
 ---
 
