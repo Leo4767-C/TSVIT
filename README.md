@@ -5,7 +5,7 @@ This repository presents **TSViT-DINOv3**, an advanced architectural evolution o
 While standard TSViT factorizes time and space into two sequential transformer stages, its spatial encoder historically relied on a vanilla ViT equipped with 1D static learnable positional embeddings, standard GELU MLPs, and basic residual connections. In **TSViT-DINOv3**, we replace the vanilla spatial encoder with a custom-engineered **DINO-v3 Spatial Backbone**, introducing:
 1. **2D Axial Rotary Position Embedding (2D RoPE)** for analytical, translation-invariant spatial geometry.
 2. **SwiGLU Gated Feed-Forward Networks** for expressive, non-saturating non-linear feature gating.
-3. **LayerScale Diagonal Stabilization ($\gamma = 10^{-5}$)** for smooth residual learning and gradient damping.
+3. **LayerScale Diagonal Stabilization** ($\gamma = 10^{-5}$) for smooth residual learning and gradient damping.
 
 ---
 
@@ -113,7 +113,7 @@ In the baseline TSViT architecture:
 <p align="center">
   <img src="figures/tsvit-dinov3-spatial.png" alt="TSViT-DINOv3 Integrated Architecture" width="850"/>
   <br>
-  <em>Figure 2: Architecture of TSViT-DINOv3 after replacing the vanilla Spatial Transformer with the DINO-v3 Vision Backbone. Features from the Temporal Transformer undergo linear projection ($d \to D$), dynamic [CLS] and register token concatenation, ViT blocks with 2D Axial RoPE self-attention, and token filtering before reaching the dense segmentation head.</em>
+  <em>Figure 2: Architecture of TSViT-DINOv3 after replacing the vanilla Spatial Transformer with the DINO-v3 Vision Backbone. Features from the Temporal Transformer undergo linear projection (from dimension d to D), dynamic [CLS] and register token concatenation, ViT blocks with 2D Axial RoPE self-attention, and token filtering before reaching the dense segmentation head.</em>
 </p>
 
 Our integration implements the core mathematical modules of Meta's DINO-v3 inside [`models/TSViT/dinov3.py`](models/TSViT/dinov3.py): each spatial block incorporates pre-LayerNorm, 2D Axial RoPE multi-head attention, LayerScale diagonal weighting ($\gamma = 10^{-5}$), and a SwiGLU Gated Feed-Forward network.
@@ -191,7 +191,7 @@ The following table traces the transformation of tensors through each stage of `
 | **6** | Temporal Tokens | `(1, 19, 128)` | `(B * 144, 19 + 60, 128)` | Prepend $K=19$ learnable class tokens to the temporal sequence length: $T' = 79$. |
 | **7** | Temporal ViT | `temporal_transformer` | `(B * 144, 19, 128)` | 4 Transformer blocks with temporal self-attention; extracts class token outputs `[:, :19]`. |
 | **8** | Spatial Rearrange | Permute & Rearrange | `(B * 19, 144, 128)` | Regroups tokens so that for each class $k \in \{0 \dots 18\}$, all 144 spatial patches form a grid. |
-| **9** | **DINO-v3 Backbone** | [`DINOv3SpatialEncoder`](models/TSViT/dinov3.py#L167) | `(B * 19, 144, 128)` | **4 DINO-v3 blocks: 2D RoPE rotation ($H_p=12, W_p=12$), LayerScale ($\gamma=10^{-5}$), SwiGLU MLP**. |
+| **9** | **DINO-v3 Backbone** | [`DINOv3SpatialEncoder`](models/TSViT/dinov3.py#L167) | `(B * 19, 144, 128)` | 4 DINO-v3 blocks: 2D RoPE rotation ($H_p=W_p=12$), LayerScale ($\gamma=10^{-5}$), SwiGLU MLP. |
 | **10** | Segmentation Head | `mlp_head` | `(B * 19, 144, 4)` | `nn.LayerNorm(128)` $\to$ `nn.Linear(128, 4)` projecting each patch embedding to $P^2 = 4$ pixels. |
 | **11** | Dense Logit Fold | Rearrange | `(B, 19, 24, 24)` | Reshapes patches $12 \times 12$ and sub-pixels $2 \times 2$ into full spatial resolution dense logits. |
 
@@ -281,7 +281,7 @@ During backpropagation, gradients propagate backward from the scalar loss throug
 <p align="center">
   <img src="figures/gradient-flow-dinov3.png" alt="Gradient Flow Through the DINO-v3 Spatial Backbone" width="850"/>
   <br>
-  <em>Figure 3: Analytical gradient flow through the DINO-v3 Spatial Backbone during backpropagation. The diagram illustrates how continuous non-linear gradients propagate through SwiGLU, LayerScale maintains residual stability via diagonal scaling ($\gamma = 10^{-5}$), and 2D Axial RoPE preserves the Frobenius norm of attention gradients ($\|\nabla_q \mathcal{L}\|_F = \|\nabla_{q_{\text{rot}}} \mathcal{L}\|_F$).</em>
+  <em>Figure 3: Analytical gradient flow through the DINO-v3 Spatial Backbone during backpropagation. The diagram illustrates how continuous non-linear gradients propagate through SwiGLU, LayerScale maintains residual stability via diagonal parameter scaling (γ = 10⁻⁵), and 2D Axial RoPE preserves the Frobenius norm of attention gradients.</em>
 </p>
 
 #### Core Stability Mechanisms During Backpropagation:
@@ -295,7 +295,7 @@ $$
 
    The continuous derivative $\text{SiLU}'(z) = \sigma(z) \cdot (1 + z(1 - \sigma(z)))$ remains non-zero across active ranges, completely preventing the "dying ReLU" neuron phenomenon.
 
-2. **Gradient Damping via LayerScale ($\gamma = 10^{-5}$)**:  
+2. **Gradient Damping via LayerScale** ($\gamma = 10^{-5}$):  
 
 $$
 \frac{\partial \mathcal{L}}{\partial f} = \gamma \odot \frac{\partial \mathcal{L}}{\partial x_{l+1}}
@@ -515,12 +515,11 @@ In agricultural SITS, field boundaries are often misclassified by vanilla ViTs d
 
 ## 9. Architectural Discussion: Spatial Replacement vs. Patch-Embedding DINOv3
 
-A key technical distinction exists between two paradigms for integrating DINO-v3 into satellite time series:
+* **Approach 1 (Front-End Input Patch-Embedding Substitution)**:  
+  `Satellite (10 Bands)` → *(Discard 7 Bands)* → `RGB` → *(Upsample 24×24 to 192×192)* → `Frozen DINOv3` → `Projection` → `TSViT`
 
-- **Approach 1 (Front-End Input Patch-Embedding Substitution)**:
-  $$\text{Satellite (10 Bands)} \xrightarrow{\text{Discard 7 Bands}} \text{RGB} \xrightarrow{\text{Upsample } 24 \to 192} \text{Frozen DINOv3} \xrightarrow{\text{Projection}} \text{TSViT}$$
-- **Approach 2 (Full Spatial Transformer Backbone Replacement - Ours)**:
-  $$\text{Satellite (10 Bands + DOY)} \xrightarrow{\text{Patch Embedding}} \text{Temporal ViT} \xrightarrow{\text{DINO-v3 Spatial Backbone}} \text{Segmentation Head}$$
+* **Approach 2 (Full Spatial Transformer Backbone Replacement - Ours)**:  
+  `Satellite (10 Bands + DOY)` → `Patch Embedding` → `Temporal ViT (T=60)` → `DINO-v3 Spatial Backbone` → `Segmentation Head`
 
 ### Why Spatial Backbone Replacement is Superior for SITS:
 1. **Preserves Native Multispectral Calibration**: Sentinel-2 provides 10 physical reflectance bands critical for vegetation indices (e.g., Red Edge bands B05–B07, NIR B08, SWIR B11–B12). Discarding 7 bands to fit an RGB backbone loses essential physiological crop signals.
