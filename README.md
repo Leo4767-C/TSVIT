@@ -2,110 +2,110 @@
 
 ---
 
-## Mục lục
+## Table of Contents
 
-| # | Mục | Nội dung tóm tắt |
+| # | Section | Summary |
 |:---:|---|---|
-| **1** | [Project Overview](#1-project-overview) | Dự án làm gì, cho ai, giải quyết vấn đề gì. |
-| **2** | [System Overview](#2-system-overview) | Kiến trúc ngắn gọn, luồng xử lý chính. |
-| **3** | [Environment](#3-environment) | Yêu cầu môi trường, version, file cần có. |
-| **4** | [Setup](#4-setup) | Các bước cài đặt theo thứ tự. |
-| **5** | [Run & Verify](#5-run--verify) | Cách chạy và cách biết chạy đúng. |
-| **6** | [Usage / API](#6-usage--api) | Cách dùng giao diện hoặc gọi API. |
-| **7** | [AI Model](#7-ai-model) | Model version, input/output, giới hạn. |
-| **8** | [Troubleshooting](#8-troubleshooting) | Lỗi thường gặp và cách xử lý. |
+| **1** | [Project Overview](#1-project-overview) | What this project does, who it serves, and the problem it solves. |
+| **2** | [System Overview](#2-system-overview) | Architecture overview and main processing pipeline. |
+| **3** | [Environment](#3-environment) | System requirements, versions, and dependencies. |
+| **4** | [Setup](#4-setup) | Step-by-step installation instructions. |
+| **5** | [Run & Verify](#5-run--verify) | How to run training and how to confirm it works correctly. |
+| **6** | [Usage / API](#6-usage--api) | Configuration interface and command-line usage. |
+| **7** | [AI Model](#7-ai-model) | Model version, components, input/output, and limitations. |
+| **8** | [Troubleshooting](#8-troubleshooting) | Common errors and how to resolve them. |
 
 ---
 
 ## 1. Project Overview
 
-### Tổng quan dự án
+### What This Project Does
 
-Dự án này xây dựng **TSViT-DINOv3**, một kiến trúc nâng cấp của **Temporal-Spatial Vision Transformer (TSViT)** nhằm phân đoạn ngữ nghĩa ảnh viễn thám đa thời gian (Satellite Image Time Series — SITS) cho bài toán phân loại cây trồng nông nghiệp.
+This project implements **TSViT-DINOv3**, an advanced evolution of the **Temporal-Spatial Vision Transformer (TSViT)** for pixel-level semantic segmentation of multi-temporal Satellite Image Time Series (SITS) targeting agricultural crop type mapping.
 
-Trong kiến trúc TSViT gốc, bộ mã hóa không gian dùng ViT cơ bản với mã hóa vị trí 1D tĩnh, MLP dùng GELU, và kết nối tàn dư thông thường. TSViT-DINOv3 thay thế bộ mã hóa không gian này bằng **DINO-v3 Spatial Backbone**, mang đến ba cải tiến chính:
+In the original TSViT architecture, the spatial encoder uses a vanilla ViT with static 1D learnable positional embeddings, standard GELU MLPs, and basic residual connections. TSViT-DINOv3 replaces the spatial encoder with a custom-engineered **DINO-v3 Spatial Backbone**, introducing three key improvements:
 
-1. **2D Axial Rotary Position Embedding (2D RoPE)** — mã hóa vị trí không gian 2 chiều liên tục, bất biến tịnh tiến.
-2. **SwiGLU Gated Feed-Forward Networks** — mạng truyền thẳng có cổng cấp, tránh hiện tượng neuron chết.
-3. **LayerScale Diagonal Stabilization** (γ = 10⁻⁵) — ổn định gradient khi huấn luyện sâu.
+1. **2D Axial Rotary Position Embedding (2D RoPE)** — continuous 2D spatial position encoding with translation invariance.
+2. **SwiGLU Gated Feed-Forward Networks** — gated feed-forward networks that prevent dying neurons.
+3. **LayerScale Diagonal Stabilization** (γ = 10⁻⁵) — gradient stabilization for deep training.
 
-### Thông số dự án
+### Project Specifications
 
-| Chiều | Giá trị | Ghi chú |
+| Dimension | Value | Notes |
 |---|---|---|
-| **Nhiệm vụ chính** | Phân đoạn ngữ nghĩa cấp pixel & phân loại cây trồng cấp thửa ruộng | Bản đồ loại cây trồng |
-| **Tập dữ liệu** | **PASTIS-24** (Fold 1–5) | Chuỗi thời gian ảnh Sentinel-2 nông nghiệp thực tế |
-| **Độ phân giải không gian** | 24 × 24 pixel (10 m/pixel → 240 × 240 m mặt đất) | Giữ nguyên độ phân giải gốc |
-| **Chiều dài chuỗi thời gian** | T = 60 ngày chụp | Khoảng thời gian không đều, bao phủ toàn bộ chu kỳ sinh trưởng |
-| **Kênh phổ** | 10 băng tần Sentinel-2 + 1 chỉ số DOY = 11 kênh | Phản xạ đa phổ |
-| **Số lớp mục tiêu** | 19 loại cây trồng (nhãn 0–18) + nhãn Void (19) | Mặt nạ hiệu lực động M |
-| **Đóng góp kiến trúc** | Đưa DINO-v3 ViT Engine vào tầng không gian | 2D RoPE + SwiGLU + LayerScale |
-| **Khả năng hạ nguồn** | Phân đoạn pixel (`TSViT_DINOv3`) & Phân loại tile (`TSViTcls_DINOv3`) | Hỗ trợ trong cùng mã nguồn |
+| **Primary Task** | Pixel-level semantic segmentation & parcel-level crop classification | Field-level crop type mapping |
+| **Benchmark Dataset** | **PASTIS-24** (Fold 1–5 protocol) | Real-world agricultural Sentinel-2 time series |
+| **Spatial Tile Resolution** | 24 × 24 pixels (10 m/pixel → 240 × 240 m ground footprint) | Native sensor resolution preserved |
+| **Temporal Sequence Length** | T = 60 satellite acquisitions | Irregular intervals covering full phenological cycle |
+| **Spectral Channels** | 10 Sentinel-2 bands + 1 Day-of-Year (DOY) index = 11 channels | Multispectral reflectance preserved |
+| **Target Classes** | 19 crop categories (Labels 0–18) + Void label 19 | Supervised via dynamic validity mask M |
+| **Core Contribution** | Insertion of DINO-v3 ViT Engine into the spatial stage | Analytical 2D RoPE + SwiGLU + LayerScale |
+| **Downstream Capabilities** | Dense pixel segmentation (`TSViT_DINOv3`) & Tile classification (`TSViTcls_DINOv3`) | Unified codebase |
 
-### Câu hỏi nghiên cứu
+### Research Questions
 
-1. **Làm sao bảo toàn hình học thửa ruộng chi tiết trong Vision Transformer?**
-   Vanilla ViT duỗi phẳng lưới không gian thành chuỗi 1D và cộng vector vị trí 1D học được, mất đi hình học tọa độ Euclid. 2D Axial RoPE của DINO-v3 nhúng các phép quay tần số liên tục trực tiếp vào phép chiếu query và key, đảm bảo tính bất biến tịnh tiến toán học qua các ranh giới thửa ruộng.
+1. **How to preserve fine-grained agricultural parcel geometry in Vision Transformers?**
+   Vanilla ViTs flatten spatial grids into 1D sequences and add learnable 1D position vectors, discarding Euclidean coordinate geometry. DINO-v3's 2D Axial RoPE injects analytical continuous frequency rotations directly into query and key projections, guaranteeing mathematical translation invariance across parcel boundaries.
 
-2. **Làm sao ổn định transformer không gian sâu đa thời gian khi chuyển giao học?**
-   Thay thế khối transformer tiêu chuẩn thường làm mất ổn định trọng số đã huấn luyện. Bằng LayerScale (γ = 10⁻⁵) và SwiGLU, mạng bắt đầu tối ưu gần như là toán tử đồng nhất (x ≈ x), cho phép khôi phục trọng số từng phần (`partial_restore: True`) suôn sẻ.
+2. **How to stabilize deep multi-temporal spatial transformers during transfer learning?**
+   Replacing standard transformer blocks often destabilizes pretrained weights. By utilizing LayerScale (γ = 10⁻⁵) and SwiGLU, the network begins optimization essentially as an identity operator (x ≈ x), allowing seamless partial weight restoration (`partial_restore: True`).
 
-3. **Làm sao giữ đầy đủ 10 băng phổ cảm biến mà không chuyển đổi phá hủy sang RGB?**
-   Khác với các phương pháp thay thế đầu vào bằng mô hình DINOv3 RGB (buộc bỏ 7 băng Sentinel-2 và nội suy 24×24 → 192×192), thiết kế của chúng tôi đưa DINO-v3 vào **tầng attention không gian**, giữ nguyên 10 băng phổ vật lý và hiệu chuẩn cảm biến gốc.
+3. **How to preserve full 10-band multispectral sensor information without destructive RGB conversion?**
+   Unlike methods that substitute the input patch embedding with an off-the-shelf RGB DINOv3 model (which forces dropping 7 Sentinel-2 bands and upsampling 24×24 → 192×192), our design inserts DINO-v3 directly into the **spatial attention stage**, preserving all 10 physical spectral bands and native sensor calibration.
 
 ---
 
 ## 2. System Overview
 
-### Kiến trúc tổng thể
+### Architecture
 
-TSViT-DINOv3 phân rã bài toán attention trên cả không gian và thời gian thành hai cơ chế attention tuần tự: attention tự thời gian theo ngày chụp, rồi attention tự không gian theo các patch.
+TSViT-DINOv3 factorizes the computationally prohibitive joint space-time attention into two sequential mechanisms: temporal self-attention across acquisition dates, followed by spatial self-attention across patches.
 
 <p align="center">
-  <img src="figures/tsvit-baseline.png" alt="Kiến trúc TSViT gốc" width="850"/>
+  <img src="figures/tsvit-baseline.png" alt="Original TSViT Architecture" width="850"/>
   <br>
-  <em>Hình 1: Kiến trúc Temporal-Spatial Vision Transformer (TSViT) gốc từ Tarasiou et al. (CVPR 2023), minh họa bộ mã hóa thời gian tách rời, trích xuất class-token, bộ mã hóa không gian vanilla với positional embedding 1D, và đầu tái tạo pixel dày đặc.</em>
+  <em>Figure 1: Original Temporal-Spatial Vision Transformer (TSViT) architecture from Tarasiou et al. (CVPR 2023), showing the decoupled temporal encoder, class-token extraction, vanilla spatial encoder with 1D positional embeddings, and dense pixel-level reconstruction head.</em>
 </p>
 
-Luồng xử lý chính:
+Main processing pipeline:
 
 ```
-Ảnh vệ tinh (10 băng + DOY)
+Satellite Image (10 bands + DOY)
     → Patch Embedding
     → Temporal Transformer (T=60)
     → DINO-v3 Spatial Backbone
     → Segmentation Head
-    → Bản đồ phân đoạn pixel
+    → Dense Pixel Segmentation Map
 ```
 
 <p align="center">
-  <img src="figures/tsvit-dinov3-spatial.png" alt="Kiến trúc TSViT-DINOv3 tích hợp" width="850"/>
+  <img src="figures/tsvit-dinov3-spatial.png" alt="TSViT-DINOv3 Integrated Architecture" width="850"/>
   <br>
-  <em>Hình 2: Kiến trúc TSViT-DINOv3 sau khi thay thế Spatial Transformer vanilla bằng DINO-v3 Vision Backbone. Đặc trưng từ Temporal Transformer trải qua phép chiếu tuyến tính (d → D), nối token [CLS] và register động, các ViT block với 2D Axial RoPE self-attention, và lọc token trước khi đến segmentation head dày đặc.</em>
+  <em>Figure 2: TSViT-DINOv3 architecture after replacing the vanilla Spatial Transformer with the DINO-v3 Vision Backbone. Features from the Temporal Transformer undergo linear projection (d → D), dynamic [CLS] and register token concatenation, ViT blocks with 2D Axial RoPE self-attention, and token filtering before reaching the dense segmentation head.</em>
 </p>
 
-### Dòng dữ liệu qua hệ thống (Tensor Lifecycle)
+### Tensor Lifecycle
 
-| Giai đoạn | Module | Kích thước đầu vào | Kích thước đầu ra | Phép toán & ghi chú |
+| Stage | Module | Input Shape | Output Shape | Operation & Notes |
 |:---:|:---:|:---:|:---:|---|
-| **1** | DataLoader | — | `(B, 60, 11, 24, 24)` | B batch, T=60 ngày chụp, 10 băng S2 + 1 DOY, 24×24 pixel. |
-| **2** | DOY Extraction | `(B, 60, 11, 24, 24)` | Reflectance: `(B, 60, 10, 24, 24)`, DOY: `(B, 60)` | Tách kênh cuối. DOY chuẩn hóa về [0, 1] rồi ánh xạ sang ngày 0–365. |
-| **3** | DOY Embedding | `(B, 60)` | `(B, 60, 128)` | `F.one_hot(doy, 366)` rồi `nn.Linear(366, 128)`. |
-| **4** | Patch Embedding | `(B, 60, 10, 24, 24)` | `(B*144, 60, 128)` | Patch hóa 2×2 không chồng lấp (P=2 → 12×12 = 144 patch). Chiếu tuyến tính 40 → 128. |
-| **5** | DOY Addition | `(B*144, 60, 128)` | `(B*144, 60, 128)` | Cộng broadcast positional embedding thời gian cho mỗi chuỗi patch. |
-| **6** | Temporal Tokens | `(1, 19, 128)` | `(B*144, 79, 128)` | Nối K=19 class token học được vào đầu chuỗi thời gian: T' = 79. |
-| **7** | Temporal ViT | `temporal_transformer` | `(B*144, 19, 128)` | 4 Transformer block với attention thời gian; trích đầu ra class token `[:, :19]`. |
-| **8** | Spatial Rearrange | Permute & Rearrange | `(B*19, 144, 128)` | Nhóm lại sao cho mỗi lớp k ∈ {0…18}, toàn bộ 144 patch tạo thành lưới. |
-| **9** | **DINO-v3 Backbone** | [`DINOv3SpatialEncoder`](models/TSViT/dinov3.py) | `(B*19, 144, 128)` | 4 block DINO-v3: quay 2D RoPE (lưới 12×12), LayerScale (γ=10⁻⁵), SwiGLU MLP. |
-| **10** | Segmentation Head | `mlp_head` | `(B*19, 144, 4)` | `nn.LayerNorm(128)` → `nn.Linear(128, 4)` chiếu mỗi embedding patch xuống P² = 4 pixel. |
-| **11** | Dense Logit Fold | Rearrange | `(B, 19, 24, 24)` | Tái cấu trúc patch 12×12 và sub-pixel 2×2 thành logit dày đặc toàn bộ độ phân giải. |
+| **1** | DataLoader | — | `(B, 60, 11, 24, 24)` | B batches, T=60 acquisitions, 10 S2 bands + 1 DOY, 24×24 pixels. |
+| **2** | DOY Extraction | `(B, 60, 11, 24, 24)` | Reflectance: `(B, 60, 10, 24, 24)`, DOY: `(B, 60)` | Slices last channel. DOY normalized to [0, 1] and mapped to day 0–365. |
+| **3** | DOY Embedding | `(B, 60)` | `(B, 60, 128)` | `F.one_hot(doy, 366)` followed by `nn.Linear(366, 128)`. |
+| **4** | Patch Embedding | `(B, 60, 10, 24, 24)` | `(B*144, 60, 128)` | Non-overlapping 2×2 patchification (P=2 → 12×12 = 144 patches). Linear projection 40 → 128. |
+| **5** | DOY Addition | `(B*144, 60, 128)` | `(B*144, 60, 128)` | Broadcast addition of temporal positional embeddings to each patch sequence. |
+| **6** | Temporal Tokens | `(1, 19, 128)` | `(B*144, 79, 128)` | Prepend K=19 learnable class tokens to the temporal sequence: T' = 79. |
+| **7** | Temporal ViT | `temporal_transformer` | `(B*144, 19, 128)` | 4 Transformer blocks with temporal self-attention; extracts class token outputs `[:, :19]`. |
+| **8** | Spatial Rearrange | Permute & Rearrange | `(B*19, 144, 128)` | Regroups tokens so that for each class k ∈ {0…18}, all 144 spatial patches form a grid. |
+| **9** | **DINO-v3 Backbone** | [`DINOv3SpatialEncoder`](models/TSViT/dinov3.py) | `(B*19, 144, 128)` | 4 DINO-v3 blocks: 2D RoPE rotation (12×12 grid), LayerScale (γ=10⁻⁵), SwiGLU MLP. |
+| **10** | Segmentation Head | `mlp_head` | `(B*19, 144, 4)` | `nn.LayerNorm(128)` → `nn.Linear(128, 4)` projecting each patch embedding to P² = 4 pixels. |
+| **11** | Dense Logit Fold | Rearrange | `(B, 19, 24, 24)` | Reshapes patches 12×12 and sub-pixels 2×2 into full spatial resolution dense logits. |
 
-### Biến thể kiến trúc: Phân đoạn và Phân loại
+### Architectural Variants: Segmentation vs. Classification
 
-Mã nguồn hỗ trợ cả phân đoạn dày đặc và phân loại toàn cục:
+The codebase natively supports both dense segmentation and global classification:
 
 ```python
-# Phân đoạn ngữ nghĩa (models/TSViT/TSViTdense.py)
+# Semantic Segmentation (models/TSViT/TSViTdense.py)
 class TSViT_DINOv3(TSViT):
     def __init__(self, model_config):
         model_config = dict(model_config)
@@ -113,126 +113,126 @@ class TSViT_DINOv3(TSViT):
         super().__init__(model_config)
 ```
 
-Trong [`models/TSViT/TSViTcls.py`](models/TSViT/TSViTcls.py), phân loại nối thêm token [CLS] không gian chuyên biệt:
+In [`models/TSViT/TSViTcls.py`](models/TSViT/TSViTcls.py), classification prepends a dedicated spatial [CLS] token:
 
 ```python
-# Phân loại cây trồng với bảo toàn token [CLS] (models/TSViT/TSViTcls.py)
+# Crop Classification with [CLS] Token Preservation (models/TSViT/TSViTcls.py)
 cls_space_tokens = repeat(self.space_token, '() N d -> b N d', b=B * self.num_classes)
 x = torch.cat((cls_space_tokens, x), dim=1)  # Shape: (B * 19, 1 + 144, 128)
 
-# Trong dinov3.py: has_cls_token=True bảo vệ token [CLS] khỏi phép quay tọa độ 2D
+# In dinov3.py: has_cls_token=True protects [CLS] token from 2D coordinate rotation
 x = self.space_transformer(x, h=self.num_patches_1d, w=self.num_patches_1d, has_cls_token=True)[:, 0]
 out = self.mlp_head(x)  # Output Shape: (B, 19)
 ```
 
-### So sánh hướng tiếp cận kiến trúc
+### Architectural Comparison
 
-* **Hướng 1 — Thay thế Patch-Embedding đầu vào**:
-  `Ảnh vệ tinh (10 băng)` → *(Bỏ 7 băng)* → `RGB` → *(Nội suy 24×24 lên 192×192)* → `DINOv3 đông cứng` → `Chiếu` → `TSViT`
+* **Approach 1 — Front-End Patch-Embedding Substitution**:
+  `Satellite (10 bands)` → *(Drop 7 bands)* → `RGB` → *(Upsample 24×24 to 192×192)* → `Frozen DINOv3` → `Projection` → `TSViT`
 
-* **Hướng 2 — Thay thế toàn bộ Spatial Backbone (hướng của chúng tôi)**:
-  `Ảnh vệ tinh (10 băng + DOY)` → `Patch Embedding` → `Temporal ViT (T=60)` → `DINO-v3 Spatial Backbone` → `Segmentation Head`
+* **Approach 2 — Full Spatial Backbone Replacement (Ours)**:
+  `Satellite (10 bands + DOY)` → `Patch Embedding` → `Temporal ViT (T=60)` → `DINO-v3 Spatial Backbone` → `Segmentation Head`
 
-Lý do hướng 2 phù hợp hơn cho SITS:
-1. **Giữ nguyên hiệu chuẩn đa phổ gốc**: Sentinel-2 cung cấp 10 băng phản xạ vật lý cần thiết cho chỉ số thực vật (Red Edge B05–B07, NIR B08, SWIR B11–B12). Bỏ 7 băng để dùng backbone RGB sẽ mất tín hiệu sinh lý cây trồng quan trọng.
-2. **Tránh nội suy song tuyến phá hủy**: Ép tile 24×24 lên 192×192 bằng nội suy 8× tạo ra nhiễu mờ mà không thêm độ phân giải mặt đất thực.
-3. **Phân rã thời gian trước**: Áp dụng DINO-v3 sau bộ mã hóa thời gian cho phép attention không gian hoạt động trực tiếp trên class token đã tổng hợp sinh trưởng, tối đa hóa khả năng phân định ngữ nghĩa.
+Why Approach 2 is superior for SITS:
+1. **Preserves native multispectral calibration**: Sentinel-2 provides 10 physical reflectance bands critical for vegetation indices (Red Edge B05–B07, NIR B08, SWIR B11–B12). Dropping 7 bands to fit an RGB backbone loses essential physiological crop signals.
+2. **Avoids destructive bilinear upsampling**: Forcing 24×24 tiles into 192×192 through 8× interpolation introduces artificial blur without adding real ground resolution.
+3. **Temporal-first factorization**: Applying DINO-v3 after the temporal encoder allows spatial attention to operate directly on high-level, phenologically aggregated crop class tokens, maximizing semantic delineation.
 
 ---
 
 ## 3. Environment
 
-### Yêu cầu hệ thống đã xác minh
+### Verified System Requirements
 
-| Thành phần | Yêu cầu |
+| Component | Requirement |
 |---|---|
-| **Hệ điều hành** | Ubuntu 22.04 / 24.04 LTS (x86_64) |
+| **Operating System** | Ubuntu 22.04 / 24.04 LTS (x86_64) |
 | **Python** | 3.10, 3.11, 3.12, 3.13 |
-| **PyTorch / Torchvision** | PyTorch 2.0+ với CUDA 11.8 / CUDA 12.1+ |
+| **PyTorch / Torchvision** | PyTorch 2.0+ with CUDA 11.8 / CUDA 12.1+ |
 | **GPU** | NVIDIA GPU (RTX 3090, RTX 4090, A100, V100, RTX Laptop) |
 | **CUDA Drivers** | CUDA Driver Version ≥ 525.60 |
 
-### Thư viện phụ thuộc
+### Dependencies
 
-| Thư viện | Mục đích |
+| Library | Purpose |
 |---|---|
-| `torch`, `torchvision` | Framework deep learning, xử lý ảnh |
-| `numpy` | Tính toán mảng |
-| `einops` | Thao tác tensor (rearrange, repeat) |
-| `pyyaml` | Đọc cấu hình YAML |
-| `tensorboard` | Ghi log huấn luyện |
-| `scikit-learn` | Đánh giá metrics |
-| `scipy` | Hỗ trợ tính toán khoa học |
-| `matplotlib` | Trực quan hóa |
+| `torch`, `torchvision` | Deep learning framework, image processing |
+| `numpy` | Array computation |
+| `einops` | Tensor manipulation (rearrange, repeat) |
+| `pyyaml` | YAML configuration parsing |
+| `tensorboard` | Training log visualization |
+| `scikit-learn` | Metrics evaluation |
+| `scipy` | Scientific computation |
+| `matplotlib` | Plotting and visualization |
 
-### Cấu trúc thư mục dự án
+### Project Structure
 
 ```
 TSVIT/
-├── configs/                  # File cấu hình YAML cho từng thí nghiệm
+├── configs/                  # YAML configuration files for each experiment
 │   └── PASTIS24/
 │       └── TSViT_DINOv3_fold1.yaml
-├── data/                     # Dữ liệu PASTIS-24
-├── figures/                  # Hình minh họa kiến trúc
-├── metrics/                  # Hàm loss và đánh giá
-├── models/                   # Định nghĩa mô hình
+├── data/                     # PASTIS-24 dataset
+├── figures/                  # Architecture diagrams
+├── metrics/                  # Loss functions and evaluation metrics
+├── models/                   # Model definitions
 │   └── TSViT/
-│       ├── TSViTdense.py     # TSViT phân đoạn
-│       ├── TSViTcls.py       # TSViT phân loại
+│       ├── TSViTdense.py     # TSViT segmentation variant
+│       ├── TSViTcls.py       # TSViT classification variant
 │       └── dinov3.py         # DINO-v3 Spatial Backbone
-├── train_and_eval/           # Script huấn luyện và đánh giá
-├── utils/                    # Tiện ích (checkpoint, logging, ...)
-├── deepsatmodels_env.yml     # File cấu hình Conda environment
-├── LICENSE.txt               # Giấy phép Apache 2.0
-└── README.md                 # Tài liệu này
+├── train_and_eval/           # Training and evaluation scripts
+├── utils/                    # Utilities (checkpoint, logging, etc.)
+├── deepsatmodels_env.yml     # Conda environment file
+├── LICENSE.txt               # Apache 2.0 License
+└── README.md                 # This document
 ```
 
 ---
 
 ## 4. Setup
 
-### Bước 1 — Clone mã nguồn
+### Step 1 — Clone the Repository
 
 ```bash
 git clone https://github.com/Leo4767-C/TSVIT.git
 cd TSVIT
 ```
 
-### Bước 2 — Cài đặt môi trường
+### Step 2 — Install the Environment
 
-**Cách A: Dùng Conda (khuyến nghị)**
+**Option A: Using Conda (recommended)**
 
 ```bash
 conda env create -f deepsatmodels_env.yml
 conda activate deepsatmodels
 ```
 
-**Cách B: Dùng pip trong virtualenv Python 3.10+**
+**Option B: Using pip in a Python 3.10+ virtualenv**
 
 ```bash
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 pip install numpy einops pyyaml tensorboard scikit-learn scipy matplotlib
 ```
 
-### Bước 3 — Xác minh cài đặt
+### Step 3 — Verify Installation
 
 ```bash
 python -c "import torch; print('PyTorch:', torch.__version__, '| CUDA available:', torch.cuda.is_available())"
 ```
 
-Kết quả mong đợi:
+Expected output:
 
 ```
 PyTorch: 2.x.x | CUDA available: True
 ```
 
-### Bước 4 — Chuẩn bị dữ liệu PASTIS-24
+### Step 4 — Prepare PASTIS-24 Data
 
-Đặt dữ liệu PASTIS-24 vào thư mục `data/` theo đường dẫn đã khai báo trong file cấu hình YAML tương ứng.
+Place the PASTIS-24 dataset in the `data/` directory following the path specified in the corresponding YAML configuration file.
 
-### Bước 5 — Cấu hình checkpoint (nếu dùng pretrained)
+### Step 5 — Configure Checkpoint (if using pretrained weights)
 
-Đảm bảo checkpoint pretrained TSViT được đặt đúng đường dẫn và bật khôi phục từng phần:
+Ensure the pretrained TSViT checkpoint is placed at the correct path and partial restoration is enabled:
 
 ```yaml
 CHECKPOINT:
@@ -244,34 +244,34 @@ CHECKPOINT:
   save_steps: 1000000000
 ```
 
-Khi `partial_restore: True`, module [`utils/torch_utils.py:load_from_checkpoint`](utils/torch_utils.py) tự động lọc bỏ các key spatial transformer không khớp kích thước, tránh hoàn toàn lỗi shape mismatch.
+When `partial_restore: True`, the [`utils/torch_utils.py:load_from_checkpoint`](utils/torch_utils.py) function automatically filters out mismatched spatial transformer keys, ensuring zero shape conflicts.
 
 ---
 
 ## 5. Run & Verify
 
-### Huấn luyện phân đoạn ngữ nghĩa (End-to-End)
+### End-to-End Semantic Segmentation Training
 
 ```bash
-# Chạy trên 1 GPU (GPU 0)
+# Single-GPU execution (GPU 0)
 python train_and_eval/segmentation_training_transf.py \
     --config configs/PASTIS24/TSViT_DINOv3_fold1.yaml \
     --device 0
 
-# Chạy trên nhiều GPU (GPU 0 và 1)
+# Multi-GPU execution (GPUs 0 and 1)
 python train_and_eval/segmentation_training_transf.py \
     --config configs/PASTIS24/TSViT_DINOv3_fold1.yaml \
     --device 0,1
 ```
 
-Trong quá trình huấn luyện:
-- Metrics in ra mỗi `train_metrics_steps` (250 step).
-- Đánh giá trên tập validation mỗi `eval_steps` (2000 step).
-- TensorBoard log (Loss, mIoU, Accuracy, F1 theo lớp) được ghi vào `CHECKPOINT.save_path`.
+During training:
+- Metrics are printed every `train_metrics_steps` (250 steps).
+- Validation evaluation runs every `eval_steps` (2000 steps).
+- TensorBoard logs (Loss, mIoU, Accuracy, per-class F1) are saved to `CHECKPOINT.save_path`.
 
-### Đánh giá Linear Probing
+### Linear Probing Evaluation
 
-Đóng băng toàn bộ đặc trưng, chỉ huấn luyện đầu phân loại tuyến tính để đánh giá khả năng tách rời tuyến tính của đặc trưng DINO-v3:
+Freeze all feature representations and train only a linear classification head to evaluate downstream linear separability of DINO-v3 spatial features:
 
 ```bash
 python train_and_eval/segmentation_training_transf.py \
@@ -280,9 +280,9 @@ python train_and_eval/segmentation_training_transf.py \
     --lin
 ```
 
-### Phân loại cây trồng cấp thửa
+### Field-Level Crop Classification
 
-Huấn luyện phân loại tile-level dùng `TSViTcls_DINOv3` (bảo toàn token [CLS]):
+Train tile-level crop classification using the `TSViTcls_DINOv3` model (with [CLS] token preservation):
 
 ```bash
 python train_and_eval/classification_train_transf.py \
@@ -290,73 +290,73 @@ python train_and_eval/classification_train_transf.py \
     --device 0
 ```
 
-### Cách biết chạy đúng
+### How to Verify Correct Operation
 
-| Kiểm tra | Dấu hiệu hoạt động bình thường |
+| Check | Expected Behavior |
 |---|---|
-| Loss giảm dần | Loss ban đầu ~3.0, giảm xuống dưới 1.0 trong ~6.500 step đầu |
-| Không có lỗi CUDA | Không xuất hiện `CUDA out of memory` hay `RuntimeError` |
-| Metrics tăng dần | mIoU và Accuracy tăng qua các lần đánh giá validation |
-| TensorBoard có dữ liệu | Mở TensorBoard và thấy đồ thị loss, mIoU, F1 được cập nhật |
+| Loss decreasing | Initial loss ~3.0, drops below 1.0 within the first ~6,500 steps |
+| No CUDA errors | No `CUDA out of memory` or `RuntimeError` messages |
+| Metrics improving | mIoU and Accuracy increase across validation evaluations |
+| TensorBoard populated | Opening TensorBoard shows loss, mIoU, and F1 graphs being updated |
 
 ---
 
 ## 6. Usage / API
 
-### Cấu hình qua file YAML
+### YAML Configuration
 
-Toàn bộ cấu hình thí nghiệm được quản lý qua file [`configs/PASTIS24/TSViT_DINOv3_fold1.yaml`](configs/PASTIS24/TSViT_DINOv3_fold1.yaml):
+All experiment settings are managed through [`configs/PASTIS24/TSViT_DINOv3_fold1.yaml`](configs/PASTIS24/TSViT_DINOv3_fold1.yaml):
 
-| Trường YAML | Giá trị mặc định | Mô tả |
+| YAML Field | Default Value | Description |
 |---|:---:|---|
-| `MODEL.architecture` | `"TSViT_DINOv3"` | Kiến trúc mô hình (`TSViT`, `TSViT_DINOv3`, `TSViTcls`). |
-| `MODEL.spatial_backbone` | `"dinov3"` | Kích hoạt `DINOv3SpatialEncoder` (2D RoPE, SwiGLU, LayerScale). |
-| `MODEL.img_res` | `24` | Kích thước tile (24 × 24 pixel). |
-| `MODEL.patch_size` | `2` | Kích thước patch (2 × 2 → 144 patch). |
-| `MODEL.dim` | `128` | Chiều embedding token D. |
-| `MODEL.temporal_depth` | `4` | Số block Temporal Transformer. |
-| `MODEL.spatial_depth` | `4` | Số block DINO-v3 Spatial Transformer. |
-| `MODEL.heads` | `4` | Số attention head. |
-| `MODEL.dim_head` | `32` | Chiều mỗi attention head (4 × 32 = 128). |
-| `SOLVER.loss_function` | `masked_cross_entropy` | Masked Cross-Entropy Loss với mặt nạ hiệu lực M. |
-| `SOLVER.lr_base` | `1.0e-3` | Learning rate đỉnh. |
-| `SOLVER.lr_min` | `5.0e-6` | Learning rate tối thiểu sau cosine decay. |
-| `SOLVER.num_warmup_epochs` | `10` | Số epoch warmup tuyến tính. |
+| `MODEL.architecture` | `"TSViT_DINOv3"` | Model architecture (`TSViT`, `TSViT_DINOv3`, `TSViTcls`). |
+| `MODEL.spatial_backbone` | `"dinov3"` | Activates `DINOv3SpatialEncoder` (2D RoPE, SwiGLU, LayerScale). |
+| `MODEL.img_res` | `24` | Tile dimension in pixels (24 × 24). |
+| `MODEL.patch_size` | `2` | Patch spatial width (2 × 2 → 144 patches). |
+| `MODEL.dim` | `128` | Transformer token embedding dimension D. |
+| `MODEL.temporal_depth` | `4` | Number of Temporal Transformer blocks. |
+| `MODEL.spatial_depth` | `4` | Number of DINO-v3 Spatial Transformer blocks. |
+| `MODEL.heads` | `4` | Number of Multi-Head Self-Attention heads. |
+| `MODEL.dim_head` | `32` | Channel dimension per attention head (4 × 32 = 128). |
+| `SOLVER.loss_function` | `masked_cross_entropy` | Masked Cross-Entropy Loss with validity mask M. |
+| `SOLVER.lr_base` | `1.0e-3` | Peak base learning rate. |
+| `SOLVER.lr_min` | `5.0e-6` | Minimum learning rate after cosine decay. |
+| `SOLVER.num_warmup_epochs` | `10` | Linear learning rate warmup duration. |
 
-### Giao diện dòng lệnh
+### Command-Line Interface
 
 ```bash
-# Cú pháp chung cho phân đoạn
+# General syntax for segmentation
 python train_and_eval/segmentation_training_transf.py \
-    --config <đường_dẫn_yaml> \
+    --config <path_to_yaml> \
     --device <gpu_id> \
-    [--lin]                   # Tùy chọn: chỉ huấn luyện linear head
+    [--lin]                   # Optional: train linear head only
 
-# Cú pháp chung cho phân loại
+# General syntax for classification
 python train_and_eval/classification_train_transf.py \
-    --config <đường_dẫn_yaml> \
+    --config <path_to_yaml> \
     --device <gpu_id>
 ```
 
-| Tham số | Bắt buộc | Mô tả |
+| Argument | Required | Description |
 |---|:---:|---|
-| `--config` | Có | Đường dẫn đến file cấu hình YAML |
-| `--device` | Có | ID GPU (ví dụ: `0` hoặc `0,1` cho multi-GPU) |
-| `--lin` | Không | Bật chế độ linear probing (đóng băng backbone) |
+| `--config` | Yes | Path to the YAML configuration file |
+| `--device` | Yes | GPU ID (e.g., `0` or `0,1` for multi-GPU) |
+| `--lin` | No | Enable linear probing mode (freeze backbone) |
 
-### Vòng lặp huấn luyện (Training Loop)
+### Training Loop
 
-Mỗi bước huấn luyện trong [`train_and_eval/segmentation_training_transf.py`](train_and_eval/segmentation_training_transf.py):
+Each training step in [`train_and_eval/segmentation_training_transf.py`](train_and_eval/segmentation_training_transf.py):
 
 ```python
 def train_step(net, sample, loss_fn, optimizer, device, loss_input_fn):
-    optimizer.zero_grad()                               # 1. Xóa gradient
+    optimizer.zero_grad()                               # 1. Clear parameter gradients
     outputs = net(sample['inputs'].to(device))          # 2. Forward pass: (B, K=19, H=24, W=24)
-    outputs = outputs.permute(0, 2, 3, 1)               # 3. Transpose: (B, H=24, W=24, K=19)
-    ground_truth = loss_input_fn(sample, device)        # 4. Lấy nhãn và mặt nạ hiệu lực
+    outputs = outputs.permute(0, 2, 3, 1)               # 3. Transpose to: (B, H=24, W=24, K=19)
+    ground_truth = loss_input_fn(sample, device)        # 4. Fetch target labels and valid mask
     loss = loss_fn['mean'](outputs, ground_truth)       # 5. Masked Cross-Entropy Loss
-    loss.backward()                                     # 6. Backward pass: tính dL/dθ
-    optimizer.step()                                    # 7. Cập nhật tham số (AdamW)
+    loss.backward()                                     # 6. Backward pass to compute dL/dθ
+    optimizer.step()                                    # 7. Parameter update via AdamW
     return outputs, ground_truth, loss
 ```
 
@@ -364,19 +364,19 @@ def train_step(net, sample, loss_fn, optimizer, device, loss_input_fn):
 
 ## 7. AI Model
 
-### Thành phần DINO-v3
+### DINO-v3 Components
 
-Module DINO-v3 được triển khai trong [`models/TSViT/dinov3.py`](models/TSViT/dinov3.py). Mỗi block không gian gồm: pre-LayerNorm, 2D Axial RoPE multi-head attention, LayerScale (γ = 10⁻⁵), và SwiGLU Gated Feed-Forward.
+The DINO-v3 module is implemented in [`models/TSViT/dinov3.py`](models/TSViT/dinov3.py). Each spatial block consists of: pre-LayerNorm, 2D Axial RoPE multi-head attention, LayerScale (γ = 10⁻⁵), and SwiGLU Gated Feed-Forward.
 
 #### 1) 2D Axial Rotary Position Embedding (`DINOv3RoPE`)
 
-Với mỗi attention head có chiều 32, kênh đặc trưng được chia đều cho chiều dọc và ngang (16 hàng, 16 cột):
+For each attention head of dimension 32, feature channels are partitioned equally into vertical and horizontal components (16 rows, 16 columns):
 
 $$
 d_h = \frac{d_{\text{head}}}{2}, \qquad d_w = \frac{d_{\text{head}}}{2}
 $$
 
-Tần số dọc mỗi trục với cơ sở θ = 100.0:
+Frequencies along each axis are computed with base θ = 100.0:
 
 $$
 \omega_{h, i} = \theta^{-2i / d_h}, \quad 0 \le i < \frac{d_h}{2}
@@ -386,7 +386,7 @@ $$
 \omega_{w, j} = \theta^{-2j / d_w}, \quad 0 \le j < \frac{d_w}{2}
 $$
 
-Với token patch tại tọa độ lưới (y, x) trên lưới 12 × 12, biểu diễn quay 2D R(y, x) quay vector query q:
+For a patch token at grid coordinates (y, x) on the 12 × 12 patch grid, the 2D rotary representation R(y, x) rotates the query vector q:
 
 $$
 q_{\text{rot}}(y, x) =
@@ -396,60 +396,60 @@ q_{[d_h:d_{\text{head}}]} \odot \cos(x \cdot \omega_w) + \text{RotHalf}(q_{[d_h:
 \end{pmatrix}
 $$
 
-trong đó toán tử quay nửa vector ([`DINOv3RoPE.rotate_half`](models/TSViT/dinov3.py)):
+where the half-vector rotation operator ([`DINOv3RoPE.rotate_half`](models/TSViT/dinov3.py)):
 
 $$
 \text{RotHalf}(z) = \left[ -z_{\frac{d}{2}:d}, \; z_{0:\frac{d}{2}} \right]
 $$
 
-**Chứng minh bất biến tịnh tiến tương đối**:
-Logit attention giữa patch 1 và patch 2:
+**Relative Translation Invariance Proof**:
+The attention logit between patch 1 and patch 2 evaluates to:
 
 $$
 \langle q_{\text{rot}}(y_1, x_1), k_{\text{rot}}(y_2, x_2) \rangle = q^T \mathbf{R}_{2D}^T(y_1, x_1) \mathbf{R}_{2D}(y_2, x_2) k = q^T \mathbf{R}_{2D}(y_1 - y_2, x_1 - x_2) k
 $$
 
-Attention chỉ phụ thuộc vào vector dịch chuyển không gian (Δy, Δx), mang lại tính đẳng biến tịnh tiến 2D thực sự qua các ranh giới thửa ruộng nông nghiệp.
+Attention depends strictly on the spatial displacement vector (Δy, Δx), granting true 2D spatial translation equivariance across agricultural parcel boundaries.
 
 #### 2) SwiGLU Gated Feed-Forward Network (`DINOv3GatedMLP`)
 
-FFN tiêu chuẩn dùng FFN(x) = GELU(xW⁽¹⁾)W⁽²⁾. Trong DINO-v3, kiến trúc SwiGLU với ma trận cổng và chiếu học được:
+Standard FFNs use FFN(x) = GELU(xW⁽¹⁾)W⁽²⁾. In DINO-v3, the SwiGLU architecture employs learned gating and projection matrices:
 
 $$
 \text{SwiGLU}(x) = \left( \text{SiLU}(x W_{\text{gate}}) \odot (x W_{\text{up}}) \right) W_{\text{down}}
 $$
 
-trong đó SiLU(z) = z · σ(z) = z / (1 + e⁻ᶻ). Cơ chế cổng điều khiển luồng thông tin động qua tương tác nhân, tránh hiện tượng neuron chết.
+where SiLU(z) = z · σ(z) = z / (1 + e⁻ᶻ). The gating mechanism dynamically controls information flow through multiplicative interaction, avoiding dying neurons.
 
 #### 3) LayerScale Stabilization (`DINOv3LayerScale`)
 
-Cập nhật tàn dư ViT sâu được điều biến bởi tensor đường chéo γ ∈ ℝᴰ:
+Deep ViT residual updates are modulated by a learned diagonal tensor γ ∈ ℝᴰ:
 
 $$
-x_{l+1} = x_l + \text{diag}(\gamma_l) \cdot f(x_l), \quad \gamma_l \in \mathbb{R}^D, \quad \text{khởi tạo } \gamma_l = 10^{-5}
+x_{l+1} = x_l + \text{diag}(\gamma_l) \cdot f(x_l), \quad \gamma_l \in \mathbb{R}^D, \quad \text{with initial } \gamma_l = 10^{-5}
 $$
 
-Vì γ ≈ 0 khi khởi tạo, mỗi block DINO-v3 hoạt động gần như toán tử đồng nhất (x ≈ x), loại bỏ sốc biểu diễn khi khôi phục trọng số đã huấn luyện (`partial_restore: True`).
+Since γ ≈ 0 at initialization, each DINO-v3 block acts essentially as an identity operator (x ≈ x). This eliminates representation shock when restoring pretrained weights (`partial_restore: True`).
 
-### Hàm Loss: Masked Cross-Entropy
+### Loss Function: Masked Cross-Entropy
 
-Ảnh vệ tinh nông nghiệp bao gồm mây, nhiễu khí quyển, và nền phi nông nghiệp (đường, công trình, mặt nước) mã hóa là void label 19. Mặt nạ hiệu lực nhị phân M:
+Agricultural satellite imagery includes clouds, atmospheric distortions, and non-agricultural backgrounds (roads, structures, water bodies) encoded as void label 19. The binary validity mask M:
 
 $$
 M_{b, i, j} =
 \begin{cases}
-1 & \text{nếu } Y_{b, i, j} \in [0, 18] \\
-0 & \text{nếu } Y_{b, i, j} = 19 \text{ (void/nền)}
+1 & \text{if } Y_{b, i, j} \in [0, 18] \\
+0 & \text{if } Y_{b, i, j} = 19 \text{ (void/background)}
 \end{cases}
 $$
 
-Masked Cross-Entropy Loss chỉ đánh giá trên pixel cây trồng hợp lệ (M = 1):
+Masked Cross-Entropy Loss evaluates strictly over valid crop pixels where M = 1:
 
 $$
 \mathcal{L}_{\text{MCE}}(\hat{Y}, Y, M) = - \frac{1}{\sum_{b, i, j} M_{b, i, j}} \sum_{b=1}^B \sum_{i=1}^H \sum_{j=1}^W M_{b, i, j} \sum_{c=0}^{K-1} I(Y_{b, i, j} = c) \log \left( \frac{\exp(\hat{Y}_{b, i, j, c})}{\sum_{c'=0}^{K-1} \exp(\hat{Y}_{b, i, j, c'})} \right)
 $$
 
-Triển khai trong [`metrics/loss_functions.py:MaskedCrossEntropyLoss`](metrics/loss_functions.py):
+Implementation in [`metrics/loss_functions.py:MaskedCrossEntropyLoss`](metrics/loss_functions.py):
 
 ```python
 mask_flat = mask.reshape(-1, 1)
@@ -462,83 +462,83 @@ log_probs = F.log_softmax(masked_logits, dim=-1)
 loss = -torch.gather(log_probs, dim=1, index=masked_target).mean()
 ```
 
-Tính chất gradient quan trọng:
+Critical gradient property:
 
 $$
 M_{b, i, j} = 0 \implies \frac{\partial \mathcal{L}_{\text{MCE}}}{\partial \hat{Y}_{b, i, j, k}} \equiv 0.0, \quad \forall k \in [0, K-1]
 $$
 
-Pixel nền và pixel không hợp lệ phát ra gradient bằng 0, ngăn nhiễu nền làm hỏng trọng số mô hình.
+Non-crop background and invalid pixels emit identically zero gradient, preventing background noise from corrupting model weights during backpropagation.
 
-### Dòng gradient qua DINO-v3
+### Gradient Flow Through DINO-v3
 
 <p align="center">
-  <img src="figures/gradient-flow-dinov3.png" alt="Dòng gradient qua DINO-v3 Spatial Backbone" width="850"/>
+  <img src="figures/gradient-flow-dinov3.png" alt="Gradient Flow Through DINO-v3 Spatial Backbone" width="850"/>
   <br>
-  <em>Hình 3: Dòng gradient giải tích qua DINO-v3 Spatial Backbone trong quá trình lan truyền ngược. Sơ đồ minh họa cách gradient phi tuyến liên tục lan truyền qua SwiGLU, LayerScale duy trì ổn định tàn dư qua nhân tỉ lệ đường chéo (γ = 10⁻⁵), và 2D Axial RoPE bảo toàn chuẩn Frobenius của gradient attention.</em>
+  <em>Figure 3: Analytical gradient flow through the DINO-v3 Spatial Backbone during backpropagation. The diagram illustrates how continuous non-linear gradients propagate through SwiGLU, LayerScale maintains residual stability via diagonal parameter scaling (γ = 10⁻⁵), and 2D Axial RoPE preserves the Frobenius norm of attention gradients.</em>
 </p>
 
-Các cơ chế ổn định gradient:
+Core stability mechanisms:
 
-1. **Gradient phi tuyến liên tục (SwiGLU)**: Đạo hàm SiLU'(z) = σ(z)·(1 + z(1 − σ(z))) luôn khác 0 trong vùng hoạt động, hoàn toàn ngăn hiện tượng "dying ReLU".
+1. **Continuous Non-Linear Gradients (SwiGLU)**: The derivative SiLU'(z) = σ(z)·(1 + z(1 − σ(z))) remains non-zero across active ranges, completely preventing the "dying ReLU" phenomenon.
 
-2. **Giảm chấn gradient qua LayerScale** (γ = 10⁻⁵): Tham số đường chéo nhỏ γ = 10⁻⁵ hoạt động như bộ giảm chấn gradient quy nạp, bảo vệ biểu diễn transformer không gian sâu khỏi bùng nổ gradient.
+2. **Gradient Damping via LayerScale** (γ = 10⁻⁵): The small diagonal parameter γ = 10⁻⁵ acts as an inductive gradient damper, protecting deep spatial transformer representations from gradient explosions during early training epochs.
 
-3. **Dòng gradient không mất mát qua 2D RoPE**: Vì ma trận quay 2D R là đơn nhất (RᵀR = I), phép quay là phép đẳng cự bảo toàn chuẩn Frobenius: ‖∇_q L‖_F = ‖∇_{q_rot} L‖_F, đảm bảo không mất gradient khi biểu diễn không gian lan truyền ngược vào các block attention thời gian.
+3. **Lossless Gradient Flow via Orthogonal 2D RoPE**: Because the 2D rotary matrix R is unitary (RᵀR = I), rotation is an isometry that preserves the Frobenius norm: ‖∇_q L‖_F = ‖∇_{q_rot} L‖_F, ensuring zero vanishing gradients as spatial representations flow backward into temporal self-attention blocks.
 
-### Tối ưu hóa và lịch learning rate
+### Optimizer & Learning Rate Schedule
 
-* **Optimizer AdamW**:
+* **AdamW Optimizer**:
 
 $$
 \theta_t = \theta_{t-1} - \eta_t \left( \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon} + \lambda \theta_{t-1} \right)
 $$
 
-với λ = 0.0 (hoặc 0.01), β = (0.9, 0.999), ε = 10⁻⁸.
+where λ = 0.0 (or 0.01), β = (0.9, 0.999), ε = 10⁻⁸.
 
-* **Cosine Annealing với Linear Warmup**:
-  * **Pha warmup (Epoch 1–10)**: Tăng tuyến tính từ 10⁻⁸ đến learning rate đỉnh 10⁻³.
-  * **Pha Cosine Annealing (Epoch 11–100)**: Giảm cosine mượt từ 10⁻³ xuống learning rate tối thiểu 5 × 10⁻⁶ trong 80.000 step.
+* **Cosine Annealing with Linear Warmup**:
+  * **Warmup Phase (Epochs 1–10)**: Linear ramp from 10⁻⁸ to peak rate 10⁻³.
+  * **Cosine Annealing Phase (Epochs 11–100)**: Smooth cosine descent from 10⁻³ to minimum rate 5 × 10⁻⁶ over 80,000 steps.
 
-### Kết quả benchmark
+### Benchmark Results
 
-Đánh giá định lượng so sánh TSViT baseline với **TSViT-DINOv3** trên tập kiểm tra PASTIS-24 (19 lớp):
+Quantitative evaluation comparing baseline TSViT models with **TSViT-DINOv3** on the 19-class PASTIS-24 test set:
 
-| Kiến trúc | Spatial Backbone | Vị trí không gian | Val Loss ↓ | mIoU (%) ↑ | Macro F1 (%) ↑ | OA (%) ↑ |
+| Architecture | Spatial Backbone | Spatial Position Encoding | Val Loss ↓ | mIoU (%) ↑ | Macro F1 (%) ↑ | OA (%) ↑ |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|
-| TSViT Baseline | Vanilla ViT (GELU) | 1D tĩnh học được | 0.4128 | 61.40 | 73.20 | 81.65 |
-| TSViT-Single Token | Vanilla ViT (GELU) | 1D tĩnh học được | 0.4410 | 59.80 | 71.50 | 80.12 |
+| TSViT Baseline | Vanilla ViT (GELU) | 1D Static Learnable | 0.4128 | 61.40 | 73.20 | 81.65 |
+| TSViT-Single Token | Vanilla ViT (GELU) | 1D Static Learnable | 0.4410 | 59.80 | 71.50 | 80.12 |
 | **TSViT-DINOv3** | **DINO-v3 Backbone** | **2D Axial RoPE** | **0.3152** | **65.65** | **77.84** | **84.12** |
-| *Cải thiện ròng* | — | — | **−0.0976** | **+4.25%** | **+4.64%** | **+2.47%** |
+| *Net Improvement* | — | — | **−0.0976** | **+4.25%** | **+4.64%** | **+2.47%** |
 
-Nhận xét:
-1. **Hội tụ warmup nhanh hơn 35%**: TSViT-DINOv3 giảm loss từ ~3.02 xuống dưới 1.0 trong 6.500 step (so với 10.000 step ở baseline), nhờ 2D RoPE đưa hình học tọa độ giải tích vào ngay lập tức.
-2. **Loại bỏ đột biến phương sai gradient**: LayerScale (γ = 10⁻⁵) ngăn các đột biến tối ưu thường thấy quanh step 8.000–15.000 ở vanilla transformer.
-3. **Loss hội tụ thấp hơn**: Masked Cross-Entropy đạt loss validation ổn định thấp hơn (0.3152 so với 0.4128).
-4. **Cải thiện ranh giới thửa**: Attention bất biến tịnh tiến qua dịch chuyển tương đối (Δy, Δx) giúp TSViT-DINOv3 phân định rõ ràng ranh giới thửa ruộng sắc nét, trực tiếp đóng góp vào mức tăng +4.25% mIoU.
+Key observations:
+1. **35% Faster Warmup Convergence**: TSViT-DINOv3 drops from initial loss ~3.02 to below 1.0 within 6,500 steps (compared to 10,000 steps for baseline), because 2D RoPE injects analytical coordinate geometry immediately, relieving the model from learning position topology from scratch.
+2. **Elimination of Gradient Variance Spikes**: LayerScale initialization (γ = 10⁻⁵) prevents mid-training optimization spikes typically observed around steps 8,000–15,000 in vanilla transformers.
+3. **Lower Steady-State Loss**: Masked Cross-Entropy achieves a lower validation loss (0.3152 vs. 0.4128), demonstrating superior feature representation.
+4. **Improved Parcel Boundary Precision**: Translation-invariant attention via relative displacement (Δy, Δx) enables TSViT-DINOv3 to cleanly delineate sharp parcel borders, directly driving the +4.25% mIoU gain.
 
 ---
 
 ## 8. Troubleshooting
 
-| Triệu chứng / Lỗi | Nguyên nhân gốc | Cách xử lý |
+| Symptom / Error | Root Cause | Solution |
 |---|---|---|
-| `CUDA out of memory` khi huấn luyện | Batch size lớn với chuỗi thời gian dài (T=60). | Giảm `DATASETS.train.batch_size` trong YAML (ví dụ từ 48 xuống 16 hoặc 24), hoặc dùng multi-GPU `--device 0,1`. |
-| `Missing key(s) in state_dict: space_transformer...` | Key checkpoint baseline không khớp module DINO-v3. | Đảm bảo `CHECKPOINT.partial_restore: True` trong file cấu hình. |
-| `RuntimeError: The size of tensor a must match size of tensor b` | Kích thước lưới không khớp trong bộ nhớ đệm 2D RoPE. | Kiểm tra `img_res` (24) chia hết cho `patch_size` (2), tạo ra lưới 12 × 12. |
-| `ValueError: no valid target pixels for mean reduction` | Batch chỉ chứa pixel nền hoặc mây (mặt nạ M = 0 toàn bộ). | Hành vi bình thường cho tile hoàn toàn void; đảm bảo tập dữ liệu chứa chú thích thửa nông nghiệp hợp lệ. |
-| DataLoader chạy chậm | `num_workers` thấp gây GPU đói dữ liệu. | Đặt `DATASETS.train.num_workers: 4` hoặc `8` để tải tile bất đồng bộ đa tiến trình. |
-| Loss không giảm sau vài nghìn step | Learning rate quá cao hoặc checkpoint không tương thích. | Kiểm tra `SOLVER.lr_base`, thử giảm xuống 5e-4. Xác nhận checkpoint đúng phiên bản. |
-| Import lỗi `einops` | Chưa cài thư viện einops. | Chạy `pip install einops`. |
+| `CUDA out of memory` during training | Large batch size with long time series (T=60). | Reduce `DATASETS.train.batch_size` in YAML (e.g., from 48 to 16 or 24), or enable multi-GPU `--device 0,1`. |
+| `Missing key(s) in state_dict: space_transformer...` | Mismatch between baseline checkpoint keys and DINO-v3 spatial module. | Ensure `CHECKPOINT.partial_restore: True` is set in the configuration file. |
+| `RuntimeError: The size of tensor a must match size of tensor b` | Grid dimension mismatch in 2D RoPE cache. | Verify `img_res` (24) is evenly divisible by `patch_size` (2), producing a 12 × 12 patch grid. |
+| `ValueError: no valid target pixels for mean reduction` | Batch contains only non-crop background or cloud pixels (validity mask M = 0). | Expected behavior for fully void tiles; ensure dataset splits contain valid agricultural parcel annotations. |
+| Slow DataLoader throughput | Low `num_workers` causing GPU starvation. | Set `DATASETS.train.num_workers: 4` or `8` to enable asynchronous multi-process tile loading. |
+| Loss not decreasing after several thousand steps | Learning rate too high or incompatible checkpoint. | Check `SOLVER.lr_base`, try reducing to 5e-4. Confirm the checkpoint matches the model version. |
+| `ImportError: einops` | Missing `einops` library. | Run `pip install einops`. |
 
 ---
 
-## Tài liệu tham khảo
+## References
 
 - **TSViT / DeepSatModels**: Michail Tarasiou, Erik Chavez, Stefanos Zafeiriou. *"ViTs for SITS: Vision Transformers for Satellite Image Time Series"*, CVPR 2023. [[Paper](https://arxiv.org/abs/2301.04944)] [[Code](https://github.com/michaeltrs/DeepSatModels)].
 - **DINO-v3**: Meta AI Research. *"DINO-v3: Vision Transformers for Self-Supervised Visual Representation Learning"*, 2024. [[Paper](https://arxiv.org/abs/2508.10104)] [[Meta Repository](https://github.com/facebookresearch/dinov3)].
 - **PASTIS Benchmark**: Vivien Sainte Fare Garnot, Loic Landrieu. *"Panoptic Segmentation of Satellite Image Time Series with Field-Level Crop Labels"*, ICCV 2021. [[Dataset](https://github.com/VSainteuf/pastis-benchmark)].
 
-## Giấy phép
+## License
 
-Dự án này được cấp phép theo **Apache License 2.0** — xem file [LICENSE.txt](LICENSE.txt) để biết chi tiết.
+This project is licensed under the **Apache License 2.0** — see the [LICENSE.txt](LICENSE.txt) file for details.
