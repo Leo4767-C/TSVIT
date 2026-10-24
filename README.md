@@ -1,221 +1,106 @@
 # TSViT-DINOv3: Integrating DINO-v3 Spatial Backbone into Temporal-Spatial Vision Transformer
 
-This repository presents **TSViT-DINOv3**, an advanced architectural evolution of the **Temporal-Spatial Vision Transformer (TSViT)** for multi-temporal Satellite Image Time Series (SITS). 
-
-While standard TSViT factorizes time and space into two sequential transformer stages, its spatial encoder historically relied on a vanilla ViT equipped with 1D static learnable positional embeddings, standard GELU MLPs, and basic residual connections. In **TSViT-DINOv3**, we replace the vanilla spatial encoder with a custom-engineered **DINO-v3 Spatial Backbone**, introducing:
-1. **2D Axial Rotary Position Embedding (2D RoPE)** for analytical, translation-invariant spatial geometry.
-2. **SwiGLU Gated Feed-Forward Networks** for expressive, non-saturating non-linear feature gating.
-3. **LayerScale Diagonal Stabilization** ($\gamma = 10^{-5}$) for smooth residual learning and gradient damping.
-
 ---
 
 ## Table of Contents
 
-- [1. Project Overview & Scope](#1-project-overview--scope)
-- [2. Original TSViT & Satellite Data Pipeline](#2-original-tsvit--satellite-data-pipeline)
-  - [2.1 SITS Factored Architecture](#21-sits-factored-architecture)
-  - [2.2 PASTIS-24 Satellite Data Pipeline](#22-pastis-24-satellite-data-pipeline)
-- [3. DINO-v3 Integration: Why, Where, and How](#3-dinov-3-integration-why-where-and-how)
-  - [3.1 Limitations of Vanilla Spatial TSViT](#31-limitations-of-vanilla-spatial-tsvit)
-  - [3.2 DINO-v3 Architectural Engine](#32-dinov-3-architectural-engine)
-  - [3.3 Mathematical Formulation of DINO-v3 Components](#33-mathematical-formulation-of-dinov-3-components)
-  - [3.4 Complete Tensor Lifecycle & Transformation Table](#34-complete-tensor-lifecycle--transformation-table)
-  - [3.5 Architectural Variants: Segmentation vs. Classification](#35-architectural-variants-segmentation-vs-classification)
-- [4. Training Objective, Loss & Optimization Dynamics](#4-training-objective-loss--optimization-dynamics)
-  - [4.1 Masked Cross-Entropy (MCE) Loss Formulation](#41-masked-cross-entropy-mce-loss-formulation)
-  - [4.2 Analytical Gradient Derivation & Void Mask Behavior](#42-analytical-gradient-derivation--void-mask-behavior)
-  - [4.3 Gradient Flow & Backpropagation Through DINO-v3](#43-gradient-flow--backpropagation-through-dinov-3)
-  - [4.4 Training Step & Optimization Scheduling](#44-training-step--optimization-scheduling)
-- [5. Environment, Setup & Configuration](#5-environment-setup--configuration)
-  - [5.1 Verified System Environment](#51-verified-system-environment)
-  - [5.2 Installation & Dependencies](#52-installation--dependencies)
-  - [5.3 Checkpoint Management & Partial Restoration](#53-checkpoint-management--partial-restoration)
-  - [5.4 Configuration Hierarchy](#54-configuration-hierarchy)
-- [6. Execution, Verification & Benchmark Guide](#6-execution-verification--benchmark-guide)
-  - [6.1 End-to-End Semantic Segmentation](#61-end-to-end-semantic-segmentation)
-  - [6.2 Linear Classifier Probing (`--lin`)](#62-linear-classifier-probing---lin)
-  - [6.3 Field-Level Crop Classification](#63-field-level-crop-classification)
-- [7. Experimental Benchmark Results & Comparative Analysis](#7-experimental-benchmark-results--comparative-analysis)
-  - [7.1 PASTIS-24 Quantitative Benchmark (Fold 1)](#71-pastis-24-quantitative-benchmark-fold-1)
-  - [7.2 Loss Convergence & Training Dynamics](#72-loss-convergence--training-dynamics)
-  - [7.3 Parcel Boundary Precision & Shift Invariance](#73-parcel-boundary-precision--shift-invariance)
-- [8. Troubleshooting & Engineering Gotchas](#8-troubleshooting--engineering-gotchas)
-- [9. Architectural Discussion: Spatial Replacement vs. Patch-Embedding DINOv3](#9-architectural-discussion-spatial-replacement-vs-patch-embedding-dinov3)
-- [10. References, License & Acknowledgements](#10-references-license--acknowledgements)
+| # | Section | Summary |
+|:---:|---|---|
+| **1** | [Project Overview](#1-project-overview) | What this project does, who it serves, and the problem it solves. |
+| **2** | [System Overview](#2-system-overview) | Architecture overview and main processing pipeline. |
+| **3** | [Environment](#3-environment) | System requirements, versions, and dependencies. |
+| **4** | [Setup](#4-setup) | Step-by-step installation instructions. |
+| **5** | [Run & Verify](#5-run--verify) | How to run training and how to confirm it works correctly. |
+| **6** | [Usage / API](#6-usage--api) | Configuration interface and command-line usage. |
+| **7** | [AI Model](#7-ai-model) | Model version, components, input/output, and limitations. |
+| **8** | [Troubleshooting](#8-troubleshooting) | Common errors and how to resolve them. |
 
 ---
 
-## 1. Project Overview & Scope
+## 1. Project Overview
 
-| Dimension | Specification | Notes |
+### What This Project Does
+
+This project implements **TSViT-DINOv3**, an advanced evolution of the **Temporal-Spatial Vision Transformer (TSViT)** for pixel-level semantic segmentation of multi-temporal Satellite Image Time Series (SITS) targeting agricultural crop type mapping.
+
+In the original TSViT architecture, the spatial encoder uses a vanilla ViT with static 1D learnable positional embeddings, standard GELU MLPs, and basic residual connections. TSViT-DINOv3 replaces the spatial encoder with a custom-engineered **DINO-v3 Spatial Backbone**, introducing three key improvements:
+
+1. **2D Axial Rotary Position Embedding (2D RoPE)** — continuous 2D spatial position encoding with translation invariance.
+2. **SwiGLU Gated Feed-Forward Networks** — gated feed-forward networks that prevent dying neurons.
+3. **LayerScale Diagonal Stabilization** (γ = 10⁻⁵) — gradient stabilization for deep training.
+
+### Project Specifications
+
+| Dimension | Value | Notes |
 |---|---|---|
-| **Primary Task** | Pixel-level semantic segmentation & parcel classification | Field-level crop type mapping |
+| **Primary Task** | Pixel-level semantic segmentation & parcel-level crop classification | Field-level crop type mapping |
 | **Benchmark Dataset** | **PASTIS-24** (Fold 1–5 protocol) | Real-world agricultural Sentinel-2 time series |
-| **Spatial Tile Resolution** | $24 \times 24$ pixels ($10\,\text{m}/\text{pixel} \to 240 \times 240\,\text{m}$ ground footprint) | Native resolution without spatial interpolation |
-| **Temporal Sequence Length** | $T = 60$ satellite acquisitions | Irregular intervals covering full phenological cycle |
+| **Spatial Tile Resolution** | 24 × 24 pixels (10 m/pixel → 240 × 240 m ground footprint) | Native sensor resolution preserved |
+| **Temporal Sequence Length** | T = 60 satellite acquisitions | Irregular intervals covering full phenological cycle |
 | **Spectral Channels** | 10 Sentinel-2 bands + 1 Day-of-Year (DOY) index = 11 channels | Multispectral reflectance preserved |
-| **Target Classes** | 19 crop categories (Labels $0 \dots 18$) + Void label 19 | Supervised via dynamic validity mask $M$ |
-| **Core Architectural Contribution** | Insertion of DINO-v3 ViT Engine into the spatial stage | Analytical 2D RoPE + SwiGLU + LayerScale |
-| **Downstream Capabilities** | Dense pixel segmentation (`TSViT_DINOv3`) & Tile classification (`TSViTcls_DINOv3`) | Supported in unified codebase |
+| **Target Classes** | 19 crop categories (Labels 0–18) + Void label 19 | Supervised via dynamic validity mask M |
+| **Core Contribution** | Insertion of DINO-v3 ViT Engine into the spatial stage | Analytical 2D RoPE + SwiGLU + LayerScale |
+| **Downstream Capabilities** | Dense pixel segmentation (`TSViT_DINOv3`) & Tile classification (`TSViTcls_DINOv3`) | Unified codebase |
 
-### Research Questions Addressed
+### Research Questions
 
-1. **How to preserve fine-grained agricultural parcel geometry in Vision Transformers?**  
-   Vanilla ViTs flatten spatial grids into 1D sequences and add learnable 1D position vectors, discarding Euclidean coordinate geometry. DINO-v3's **2D Axial RoPE** injects analytical continuous frequency rotations directly into the query and key projections, guaranteeing mathematical translation invariance across parcel boundaries.
-2. **How to stabilize deep multi-temporal spatial transformers during transfer learning?**  
-   Replacing standard transformer blocks often destabilizes pretrained weights. By utilizing **LayerScale ($\gamma = 10^{-5}$)** and **SwiGLU Gated Feed-Forward Networks**, the network begins optimization essentially as an identity residual, allowing seamless partial restoration (`partial_restore: True`) from pretrained TSViT checkpoints.
-3. **How to preserve full 10-band multispectral sensor information without destructive RGB conversion?**  
-   Unlike methods that substitute the input patch embedding with an off-the-shelf RGB DINOv3 model (which forces dropping 7 Sentinel-2 bands and upsampling $24 \times 24 \to 192 \times 192$), our design inserts DINO-v3 directly into the **spatial attention stage**, preserving all 10 physical spectral bands and native sensor calibration.
+1. **How to preserve fine-grained agricultural parcel geometry in Vision Transformers?**
+   Vanilla ViTs flatten spatial grids into 1D sequences and add learnable 1D position vectors, discarding Euclidean coordinate geometry. DINO-v3's 2D Axial RoPE injects analytical continuous frequency rotations directly into query and key projections, guaranteeing mathematical translation invariance across parcel boundaries.
+
+2. **How to stabilize deep multi-temporal spatial transformers during transfer learning?**
+   Replacing standard transformer blocks often destabilizes pretrained weights. By utilizing LayerScale (γ = 10⁻⁵) and SwiGLU, the network begins optimization essentially as an identity operator (x ≈ x), allowing seamless partial weight restoration (`partial_restore: True`).
+
+3. **How to preserve full 10-band multispectral sensor information without destructive RGB conversion?**
+   Unlike methods that substitute the input patch embedding with an off-the-shelf RGB DINOv3 model (which forces dropping 7 Sentinel-2 bands and upsampling 24×24 → 192×192), our design inserts DINO-v3 directly into the **spatial attention stage**, preserving all 10 physical spectral bands and native sensor calibration.
 
 ---
 
-## 2. Original TSViT & Satellite Data Pipeline
+## 2. System Overview
 
-### 2.1 SITS Factored Architecture
+### Architecture
 
-In satellite image time series, attention across both space and time naively exhibits quadratic complexity $O((T \cdot H \cdot W)^2)$, which is computationally prohibitive for $T = 60$ and $H \times W = 24 \times 24$. TSViT factorizes this problem into two sequential attention mechanisms: temporal self-attention across acquisition dates followed by spatial self-attention across patches.
+TSViT-DINOv3 factorizes the computationally prohibitive joint space-time attention into two sequential mechanisms: temporal self-attention across acquisition dates, followed by spatial self-attention across patches.
 
 <p align="center">
   <img src="figures/tsvit-baseline.png" alt="Original TSViT Architecture" width="850"/>
   <br>
-  <em>Figure 1: Original Temporal-Spatial Vision Transformer (TSViT) architecture from Tarasiou et al. (CVPR 2023), illustrating the decoupled temporal encoder, class-token extraction, vanilla spatial encoder with 1D positional embeddings, and dense pixel-level reconstruction head.</em>
+  <em>Figure 1: Original Temporal-Spatial Vision Transformer (TSViT) architecture from Tarasiou et al. (CVPR 2023), showing the decoupled temporal encoder, class-token extraction, vanilla spatial encoder with 1D positional embeddings, and dense pixel-level reconstruction head.</em>
 </p>
 
-$$
-X \xrightarrow{\text{Temporal Transformer}} Z_{\text{temp}} \xrightarrow{\text{DINO-v3 Spatial Backbone}} Z_{\text{spatial}} \xrightarrow{\text{Segmentation Head}} \hat{Y}
-$$
+Main processing pipeline:
 
-### 2.2 PASTIS-24 Satellite Data Pipeline
-
-The **PASTIS-24** dataset provides multi-spectral time series from Sentinel-2 over agricultural regions in France:
-- **10 Reflectance Bands**: B02 (Blue), B03 (Green), B04 (Red), B05–B07 (Red Edge), B08 (NIR), B8A (Narrow NIR), B11–B12 (SWIR).
-- **Day of Year (DOY)**: Encoded as the 11th channel ($C=11$), normalized to $[0, 1]$ and mapped to a 366-dimensional sinusoidal embedding:
-
-$$
-\text{DOY}_{\text{embed}} = \text{Linear}_{366 \to D}(\text{OneHot}(\lfloor 365.0001 \cdot t_{\text{doy}} \rfloor))
-$$
-
-- **19 Crop Classes**: Meadow, Soft winter wheat, Corn, Winter barley, Winter rapeseed, Spring barley, Sunflower, Grapevine, Beet, Soy, etc.
-- **Void Label (19)**: Designates non-crop surfaces, roads, urban structures, and water bodies. A dynamic binary validity mask $M \in \{0, 1\}$ is generated on-the-fly where $M = 1$ for valid crop labels ($Y \in [0, 18]$) and $M = 0$ for void background ($Y = 19$).
-
----
-
-## 3. DINO-v3 Integration: Why, Where, and How
-
-### 3.1 Limitations of Vanilla Spatial TSViT
-
-In the baseline TSViT architecture:
-
-1. **1D Static Positional Vectors (`space_pos_embedding`)**: Patch coordinates $(y, x)$ on a $12 \times 12$ grid are flattened to indices $0 \dots 143$. A learnable 1D parameter vector $\mathbf{E} \in \mathbb{R}^{1 \times 144 \times D}$ is added directly to features, destroying 2D Euclidean distance relationships and failing to generalize under parcel spatial translations.
-
-2. **Standard GELU Feed-Forward Networks**: Conventional MLPs rely on static activation thresholds $\text{GELU}(x W^{(1)}) W^{(2)}$, which exhibit gradient saturation in deep feature regimes.
-
-3. **Absence of Residual Scaling**: In deep Vision Transformers, backpropagation residual updates accumulate without scaling:
-
-$$
-x_{l+1} = x_l + f(x_l)
-$$
-
-This causes representation and gradient variance explosion across deep spatial layers.
-
-### 3.2 DINO-v3 Architectural Engine
+```
+Satellite Image (10 bands + DOY)
+    → Patch Embedding
+    → Temporal Transformer (T=60)
+    → DINO-v3 Spatial Backbone
+    → Segmentation Head
+    → Dense Pixel Segmentation Map
+```
 
 <p align="center">
   <img src="figures/tsvit-dinov3-spatial.png" alt="TSViT-DINOv3 Integrated Architecture" width="850"/>
   <br>
-  <em>Figure 2: Architecture of TSViT-DINOv3 after replacing the vanilla Spatial Transformer with the DINO-v3 Vision Backbone. Features from the Temporal Transformer undergo linear projection (from dimension d to D), dynamic [CLS] and register token concatenation, ViT blocks with 2D Axial RoPE self-attention, and token filtering before reaching the dense segmentation head.</em>
+  <em>Figure 2: TSViT-DINOv3 architecture after replacing the vanilla Spatial Transformer with the DINO-v3 Vision Backbone. Features from the Temporal Transformer undergo linear projection (d → D), dynamic [CLS] and register token concatenation, ViT blocks with 2D Axial RoPE self-attention, and token filtering before reaching the dense segmentation head.</em>
 </p>
 
-Our integration implements the core mathematical modules of Meta's DINO-v3 inside [`models/TSViT/dinov3.py`](models/TSViT/dinov3.py): each spatial block incorporates pre-LayerNorm, 2D Axial RoPE multi-head attention, LayerScale diagonal weighting ($\gamma = 10^{-5}$), and a SwiGLU Gated Feed-Forward network.
+### Tensor Lifecycle
 
-### 3.3 Mathematical Formulation of DINO-v3 Components
-
-#### 1. 2D Axial Rotary Position Embedding (`DINOv3RoPE`)
-
-For each attention head of dimension 32, feature channels are partitioned equally into vertical and horizontal components (16 rows, 16 columns):
-
-$$
-d_h = \frac{d_{\text{head}}}{2}, \qquad d_w = \frac{d_{\text{head}}}{2}
-$$
-
-Frequencies along each axis are computed with base $\theta = 100.0$:
-
-$$
-\omega_{h, i} = \theta^{-2i / d_h}, \quad 0 \le i < \frac{d_h}{2}
-$$
-
-$$
-\omega_{w, j} = \theta^{-2j / d_w}, \quad 0 \le j < \frac{d_w}{2}
-$$
-
-For a patch token located at grid coordinates $(y, x)$ on the $12 \times 12$ patch grid, the 2D rotary representation $\mathbf{R}(y, x)$ rotates the query vector $q$:
-
-$$
-q_{\text{rot}}(y, x) = 
-\begin{pmatrix} 
-q_{[0:d_h]} \odot \cos(y \cdot \omega_h) + \text{RotHalf}(q_{[0:d_h]}) \odot \sin(y \cdot \omega_h) \\ 
-q_{[d_h:d_{\text{head}}]} \odot \cos(x \cdot \omega_w) + \text{RotHalf}(q_{[d_h:d_{\text{head}}]}) \odot \sin(x \cdot \omega_w) 
-\end{pmatrix}
-$$
-
-where the half-vector rotation operator (implemented in [`DINOv3RoPE.rotate_half`](models/TSViT/dinov3.py#L60)) is defined as:
-
-$$
-\text{RotHalf}(z) = \left[ -z_{\frac{d}{2}:d}, \; z_{0:\frac{d}{2}} \right]
-$$
-
-**Relative Translation Invariance Proof**:  
-The attention logit between patch 1 and patch 2 evaluates to:
-
-$$
-\langle q_{\text{rot}}(y_1, x_1), k_{\text{rot}}(y_2, x_2) \rangle = q^T \mathbf{R}_{2D}^T(y_1, x_1) \mathbf{R}_{2D}(y_2, x_2) k = q^T \mathbf{R}_{2D}(y_1 - y_2, x_1 - x_2) k
-$$
-
-The attention depends strictly on the spatial displacement vector $(\Delta y, \Delta x)$, granting true 2D spatial translation equivariance across agricultural parcel boundaries.
-
-#### 2. SwiGLU Gated Feed-Forward Network (`DINOv3GatedMLP`)
-
-Standard Feed-Forward Networks use $\text{FFN}(x) = \text{GELU}(x W^{(1)}) W^{(2)}$. In DINO-v3, we deploy the SwiGLU architecture with learned gating and projection matrices:
-
-$$
-\text{SwiGLU}(x) = \left( \text{SiLU}(x W_{\text{gate}}) \odot (x W_{\text{up}}) \right) W_{\text{down}}, \quad \text{where } W_{\text{gate}}, W_{\text{up}} \in \mathbb{R}^{D \times D_{\text{mlp}}}, \; W_{\text{down}} \in \mathbb{R}^{D_{\text{mlp}} \times D}
-$$
-
-where $\text{SiLU}(z) = z \cdot \sigma(z) = \frac{z}{1 + e^{-z}}$. The gating mechanism dynamically controls information flow through multiplicative interaction, avoiding dying neurons.
-
-#### 3. LayerScale Stabilization (`DINOv3LayerScale`)
-
-Deep ViT residual updates are modulated by a learned diagonal tensor $\gamma \in \mathbb{R}^D$:
-
-$$
-x_{l+1} = x_l + \text{diag}(\gamma_l) \cdot f(x_l), \quad \gamma_l \in \mathbb{R}^D, \quad \text{with initial } \gamma_l = 10^{-5}
-$$
-
-Since $\gamma \approx 0$ at initialization, each DINO-v3 block acts essentially as an identity operator ($x \approx x$). This eliminates representation shock when restoring pretrained weights (`partial_restore: True`).
-
----
-
-### 3.4 Complete Tensor Lifecycle & Transformation Table
-
-The following table traces the transformation of tensors through each stage of `TSViT_DINOv3` during semantic segmentation:
-
-| Stage | Module | Input Tensor Shape | Output Tensor Shape | Mathematical Operation & Notes |
+| Stage | Module | Input Shape | Output Shape | Operation & Notes |
 |:---:|:---:|:---:|:---:|---|
-| **1** | DataLoader | — | `(B, 60, 11, 24, 24)` | $B$ batches, $T=60$ acquisition dates, 10 S2 bands + 1 DOY band, $24 \times 24$ pixels. |
-| **2** | DOY Extraction | `(B, 60, 11, 24, 24)` | Reflectance: `(B, 60, 10, 24, 24)`<br>DOY: `(B, 60)` | Slices channel index $-1$. DOY values normalized to $[0, 1]$ and mapped to Day $0 \dots 365$. |
-| **3** | DOY Embedding | `(B, 60)` | `(B, 60, 128)` | `xt = F.one_hot(doy, 366)` followed by `nn.Linear(366, 128)`. |
-| **4** | Patch Embedding | `(B, 60, 10, 24, 24)` | `(B * 144, 60, 128)` | Non-overlapping $2 \times 2$ patchification ($P=2 \to 12 \times 12 = 144$ patches). Linear projection $40 \to 128$. |
-| **5** | DOY Addition | `(B * 144, 60, 128)` | `(B * 144, 60, 128)` | Broadcast addition of temporal positional embeddings to each spatial patch sequence. |
-| **6** | Temporal Tokens | `(1, 19, 128)` | `(B * 144, 19 + 60, 128)` | Prepend $K=19$ learnable class tokens to the temporal sequence length: $T' = 79$. |
-| **7** | Temporal ViT | `temporal_transformer` | `(B * 144, 19, 128)` | 4 Transformer blocks with temporal self-attention; extracts class token outputs `[:, :19]`. |
-| **8** | Spatial Rearrange | Permute & Rearrange | `(B * 19, 144, 128)` | Regroups tokens so that for each class $k \in \{0 \dots 18\}$, all 144 spatial patches form a grid. |
-| **9** | **DINO-v3 Backbone** | [`DINOv3SpatialEncoder`](models/TSViT/dinov3.py#L167) | `(B * 19, 144, 128)` | 4 DINO-v3 blocks: 2D RoPE rotation (12 × 12 grid), LayerScale ($\gamma=10^{-5}$), SwiGLU MLP. |
-| **10** | Segmentation Head | `mlp_head` | `(B * 19, 144, 4)` | `nn.LayerNorm(128)` $\to$ `nn.Linear(128, 4)` projecting each patch embedding to $P^2 = 4$ pixels. |
-| **11** | Dense Logit Fold | Rearrange | `(B, 19, 24, 24)` | Reshapes patches $12 \times 12$ and sub-pixels $2 \times 2$ into full spatial resolution dense logits. |
+| **1** | DataLoader | — | `(B, 60, 11, 24, 24)` | B batches, T=60 acquisitions, 10 S2 bands + 1 DOY, 24×24 pixels. |
+| **2** | DOY Extraction | `(B, 60, 11, 24, 24)` | Reflectance: `(B, 60, 10, 24, 24)`, DOY: `(B, 60)` | Slices last channel. DOY normalized to [0, 1] and mapped to day 0–365. |
+| **3** | DOY Embedding | `(B, 60)` | `(B, 60, 128)` | `F.one_hot(doy, 366)` followed by `nn.Linear(366, 128)`. |
+| **4** | Patch Embedding | `(B, 60, 10, 24, 24)` | `(B*144, 60, 128)` | Non-overlapping 2×2 patchification (P=2 → 12×12 = 144 patches). Linear projection 40 → 128. |
+| **5** | DOY Addition | `(B*144, 60, 128)` | `(B*144, 60, 128)` | Broadcast addition of temporal positional embeddings to each patch sequence. |
+| **6** | Temporal Tokens | `(1, 19, 128)` | `(B*144, 79, 128)` | Prepend K=19 learnable class tokens to the temporal sequence: T' = 79. |
+| **7** | Temporal ViT | `temporal_transformer` | `(B*144, 19, 128)` | 4 Transformer blocks with temporal self-attention; extracts class token outputs `[:, :19]`. |
+| **8** | Spatial Rearrange | Permute & Rearrange | `(B*19, 144, 128)` | Regroups tokens so that for each class k ∈ {0…18}, all 144 spatial patches form a grid. |
+| **9** | **DINO-v3 Backbone** | [`DINOv3SpatialEncoder`](models/TSViT/dinov3.py) | `(B*19, 144, 128)` | 4 DINO-v3 blocks: 2D RoPE rotation (12×12 grid), LayerScale (γ=10⁻⁵), SwiGLU MLP. |
+| **10** | Segmentation Head | `mlp_head` | `(B*19, 144, 4)` | `nn.LayerNorm(128)` → `nn.Linear(128, 4)` projecting each patch embedding to P² = 4 pixels. |
+| **11** | Dense Logit Fold | Rearrange | `(B, 19, 24, 24)` | Reshapes patches 12×12 and sub-pixels 2×2 into full spatial resolution dense logits. |
 
----
-
-### 3.5 Architectural Variants: Segmentation vs. Classification
+### Architectural Variants: Segmentation vs. Classification
 
 The codebase natively supports both dense segmentation and global classification:
 
@@ -228,197 +113,126 @@ class TSViT_DINOv3(TSViT):
         super().__init__(model_config)
 ```
 
-In [`models/TSViT/TSViTcls.py`](models/TSViT/TSViTcls.py), classification prepends a dedicated spatial `[CLS]` token:
+In [`models/TSViT/TSViTcls.py`](models/TSViT/TSViTcls.py), classification prepends a dedicated spatial [CLS] token:
 
 ```python
 # Crop Classification with [CLS] Token Preservation (models/TSViT/TSViTcls.py)
 cls_space_tokens = repeat(self.space_token, '() N d -> b N d', b=B * self.num_classes)
-x = torch.cat((cls_space_tokens, x), dim=1) # Shape: (B * 19, 1 + 144, 128)
+x = torch.cat((cls_space_tokens, x), dim=1)  # Shape: (B * 19, 1 + 144, 128)
 
-# In dinov3.py: has_cls_token=True protects [CLS] token from 2D coordinate rotation!
+# In dinov3.py: has_cls_token=True protects [CLS] token from 2D coordinate rotation
 x = self.space_transformer(x, h=self.num_patches_1d, w=self.num_patches_1d, has_cls_token=True)[:, 0]
-out = self.mlp_head(x) # Output Shape: (B, 19)
+out = self.mlp_head(x)  # Output Shape: (B, 19)
 ```
 
----
+### Architectural Comparison
 
-## 4. Training Objective, Loss & Optimization Dynamics
+* **Approach 1 — Front-End Patch-Embedding Substitution**:
+  `Satellite (10 bands)` → *(Drop 7 bands)* → `RGB` → *(Upsample 24×24 to 192×192)* → `Frozen DINOv3` → `Projection` → `TSViT`
 
-### 4.1 Masked Cross-Entropy (MCE) Loss Formulation
+* **Approach 2 — Full Spatial Backbone Replacement (Ours)**:
+  `Satellite (10 bands + DOY)` → `Patch Embedding` → `Temporal ViT (T=60)` → `DINO-v3 Spatial Backbone` → `Segmentation Head`
 
-Agricultural satellite imagery includes clouds, atmospheric distortions, and non-agricultural backgrounds (roads, structures, water bodies) encoded as void label $19$. To ensure learning focuses purely on valid crop pixels, we define the binary validity mask $M$:
-
-$$
-M_{b, i, j} = 
-\begin{cases} 
-1 & \text{if } Y_{b, i, j} \in [0, 18] \\ 
-0 & \text{if } Y_{b, i, j} = 19 \text{ (void/background)} 
-\end{cases}
-$$
-
-The Masked Cross-Entropy Loss evaluates strictly over valid agricultural parcel pixels where $M = 1$:
-
-$$
-\mathcal{L}_{\text{MCE}}(\hat{Y}, Y, M) = - \frac{1}{\sum_{b, i, j} M_{b, i, j}} \sum_{b=1}^B \sum_{i=1}^H \sum_{j=1}^W M_{b, i, j} \sum_{c=0}^{K-1} I(Y_{b, i, j} = c) \log \left( \frac{\exp(\hat{Y}_{b, i, j, c})}{\sum_{c'=0}^{K-1} \exp(\hat{Y}_{b, i, j, c'})} \right)
-$$
-
-### 4.2 Analytical Gradient Derivation & Void Mask Behavior
-
-Let the predicted class probability at pixel $(b, i, j)$ be:
-
-$$
-p_{b, i, j, c} = \text{Softmax}(\hat{Y}_{b, i, j})_c
-$$
-
-The exact analytical gradient with respect to class logit $k$ is:
-
-$$
-\frac{\partial \mathcal{L}_{\text{MCE}}}{\partial \hat{Y}_{b, i, j, k}} = \frac{M_{b, i, j}}{N_{\text{valid}}} \left( p_{b, i, j, k} - I(Y_{b, i, j} = k) \right), \quad \text{where } N_{\text{valid}} = \sum_{b, i, j} M_{b, i, j}
-$$
-
-**Critical Gradient Property**:
-
-$$
-M_{b, i, j} = 0 \implies \frac{\partial \mathcal{L}_{\text{MCE}}}{\partial \hat{Y}_{b, i, j, k}} \equiv 0.0, \quad \forall k \in [0, K-1]
-$$
-
-Non-crop background and invalid pixels emit identically zero gradient, preventing background noise from corrupting model weights during backpropagation.
-
-Implementation in [`metrics/loss_functions.py:MaskedCrossEntropyLoss`](metrics/loss_functions.py#L141-L188):
-```python
-mask_flat = mask.reshape(-1, 1)
-nclasses = logits.shape[-1]
-logits_flat = logits.reshape(-1, nclasses)
-# Filter logits and targets strictly by valid mask prior to Softmax
-masked_logits = logits_flat[mask_flat.repeat(1, nclasses)].view(-1, nclasses)
-masked_target = target.reshape(-1, 1)[mask_flat].unsqueeze(dim=-1).to(torch.int64)
-
-log_probs = F.log_softmax(masked_logits, dim=-1)
-loss = -torch.gather(log_probs, dim=1, index=masked_target).mean()
-```
+Why Approach 2 is superior for SITS:
+1. **Preserves native multispectral calibration**: Sentinel-2 provides 10 physical reflectance bands critical for vegetation indices (Red Edge B05–B07, NIR B08, SWIR B11–B12). Dropping 7 bands to fit an RGB backbone loses essential physiological crop signals.
+2. **Avoids destructive bilinear upsampling**: Forcing 24×24 tiles into 192×192 through 8× interpolation introduces artificial blur without adding real ground resolution.
+3. **Temporal-first factorization**: Applying DINO-v3 after the temporal encoder allows spatial attention to operate directly on high-level, phenologically aggregated crop class tokens, maximizing semantic delineation.
 
 ---
 
-### 4.3 Gradient Flow & Backpropagation Through DINO-v3
+## 3. Environment
 
-During backpropagation, gradients propagate backward from the scalar loss through the segmentation head, the DINO-v3 spatial backbone, and into the temporal transformer:
+### Verified System Requirements
 
-<p align="center">
-  <img src="figures/gradient-flow-dinov3.png" alt="Gradient Flow Through the DINO-v3 Spatial Backbone" width="850"/>
-  <br>
-  <em>Figure 3: Analytical gradient flow through the DINO-v3 Spatial Backbone during backpropagation. The diagram illustrates how continuous non-linear gradients propagate through SwiGLU, LayerScale maintains residual stability via diagonal parameter scaling (γ = 10⁻⁵), and 2D Axial RoPE preserves the Frobenius norm of attention gradients.</em>
-</p>
-
-#### Core Stability Mechanisms During Backpropagation:
-
-1. **Continuous Non-Linear Gradients (SwiGLU Gated-MLP)**:  
-   Gradients propagate through both the gating and up-projection paths:
-
-$$
-\frac{\partial \mathcal{L}}{\partial x} = \left(\frac{\partial \mathcal{L}}{\partial \text{Out}} W_{\text{down}}^T\right) \odot \left[ \text{SiLU}'(x W_{\text{gate}}) \odot (x W_{\text{up}}) W_{\text{gate}}^T + \text{SiLU}(x W_{\text{gate}}) W_{\text{up}}^T \right]
-$$
-
-   The continuous derivative $\text{SiLU}'(z) = \sigma(z) \cdot (1 + z(1 - \sigma(z)))$ remains non-zero across active ranges, completely preventing the "dying ReLU" neuron phenomenon.
-
-2. **Gradient Damping via LayerScale** ($\gamma = 10^{-5}$):  
-
-$$
-\frac{\partial \mathcal{L}}{\partial f} = \gamma \odot \frac{\partial \mathcal{L}}{\partial x_{l+1}}
-$$
-
-   The small diagonal parameter $\gamma = 10^{-5}$ acts as an inductive gradient damper, protecting deep spatial transformer representations from gradient explosions during early training epochs.
-
-3. **Lossless Gradient Flow via Orthogonal 2D RoPE**:  
-   Because the 2D rotary matrix $\mathbf{R}$ is unitary ($\mathbf{R}^T \mathbf{R} = \mathbf{I}$), rotation is an isometry that preserves the Frobenius norm:
-
-$$
-\| \nabla_q \mathcal{L} \|_F = \| \nabla_{q_{\text{rot}}} \mathcal{L} \|_F
-$$
-
-   This ensures zero vanishing gradients as spatial representations flow backward into the temporal self-attention blocks.
-
----
-
-### 4.4 Training Step & Optimization Scheduling
-
-The PyTorch training step in [`train_and_eval/segmentation_training_transf.py`](train_and_eval/segmentation_training_transf.py#L25-L35):
-
-```python
-def train_step(net, sample, loss_fn, optimizer, device, loss_input_fn):
-    optimizer.zero_grad()                               # 1. Clear parameter gradients
-    outputs = net(sample['inputs'].to(device))          # 2. Forward pass: (B, K=19, H=24, W=24)
-    outputs = outputs.permute(0, 2, 3, 1)               # 3. Transpose to: (B, H=24, W=24, K=19)
-    ground_truth = loss_input_fn(sample, device)        # 4. Fetch target labels and valid mask
-    loss = loss_fn['mean'](outputs, ground_truth)       # 5. Masked Cross-Entropy Loss
-    loss.backward()                                     # 6. Backward pass to compute dL/d(theta)
-    optimizer.step()                                    # 7. Parameter update via AdamW
-    return outputs, ground_truth, loss
-```
-
-#### Optimizer & Learning Rate Schedule Dynamics
-
-* **AdamW Optimizer**:
-
-$$
-\theta_t = \theta_{t-1} - \eta_t \left( \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon} + \lambda \theta_{t-1} \right)
-$$
-
-where $\lambda = 0.0$ (or $0.01$), $\beta = (0.9, 0.999)$, $\epsilon = 10^{-8}$.
-* **Cosine Annealing with Linear Warmup**:
-  * **Warmup Phase (Epochs 1–10)**: Linear learning rate ramp from $10^{-8}$ to peak rate $10^{-3}$:
-
-$$
-\eta_t = \eta_{\text{start}} + \frac{t}{T_{\text{warmup}}} (\eta_{\text{base}} - \eta_{\text{start}})
-$$
-
-  * **Cosine Annealing Phase (Epochs 11–100)**: Smooth cosine descent from $10^{-3}$ to minimum rate $5 \times 10^{-6}$ over 80,000 steps:
-
-$$
-\eta_t = \eta_{\text{min}} + \frac{1}{2}(\eta_{\text{base}} - \eta_{\text{min}}) \left( 1 + \cos\left( \frac{t - T_{\text{warmup}}}{T_{\text{total}} - T_{\text{warmup}}} \pi \right) \right)
-$$
-
----
-
-## 5. Environment, Setup & Configuration
-
-### 5.1 Verified System Environment
-
-| Component | Verified Specification |
+| Component | Requirement |
 |---|---|
 | **Operating System** | Ubuntu 22.04 / 24.04 LTS (x86_64) |
 | **Python** | 3.10, 3.11, 3.12, 3.13 |
 | **PyTorch / Torchvision** | PyTorch 2.0+ with CUDA 11.8 / CUDA 12.1+ |
-| **GPU Acceleration** | NVIDIA GPU (RTX 3090, RTX 4090, A100, V100, RTX Laptop) |
-| **CUDA Drivers** | CUDA Driver Version $\ge 525.60$ |
+| **GPU** | NVIDIA GPU (RTX 3090, RTX 4090, A100, V100, RTX Laptop) |
+| **CUDA Drivers** | CUDA Driver Version ≥ 525.60 |
 
-### 5.2 Installation & Dependencies
+### Dependencies
 
-Clone the repository and install requirements via Conda or pip:
+| Library | Purpose |
+|---|---|
+| `torch`, `torchvision` | Deep learning framework, image processing |
+| `numpy` | Array computation |
+| `einops` | Tensor manipulation (rearrange, repeat) |
+| `pyyaml` | YAML configuration parsing |
+| `tensorboard` | Training log visualization |
+| `scikit-learn` | Metrics evaluation |
+| `scipy` | Scientific computation |
+| `matplotlib` | Plotting and visualization |
 
-```bash
-# Clone the repository
-git clone https://github.com/Leo4767-C/TSVIT.git
-cd TSVIT
+### Project Structure
 
-# Option A: Create Conda environment using deepsatmodels_env.yml
-conda env create -f deepsatmodels_env.yml
-conda activate deepsatmodels
-
-# Option B: Using pip in an existing Python 3.10+ virtualenv
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
-pip install numpy einops pyyaml tensorboard scikit-learn scipy matplotlib
 ```
-
-Verify the environment:
-```bash
-python -c "import torch; print('PyTorch:', torch.__version__, '| CUDA available:', torch.cuda.is_available())"
+TSVIT/
+├── configs/                  # YAML configuration files for each experiment
+│   └── PASTIS24/
+│       └── TSViT_DINOv3_fold1.yaml
+├── data/                     # PASTIS-24 dataset
+├── figures/                  # Architecture diagrams
+├── metrics/                  # Loss functions and evaluation metrics
+├── models/                   # Model definitions
+│   └── TSViT/
+│       ├── TSViTdense.py     # TSViT segmentation variant
+│       ├── TSViTcls.py       # TSViT classification variant
+│       └── dinov3.py         # DINO-v3 Spatial Backbone
+├── train_and_eval/           # Training and evaluation scripts
+├── utils/                    # Utilities (checkpoint, logging, etc.)
+├── deepsatmodels_env.yml     # Conda environment file
+├── LICENSE.txt               # Apache 2.0 License
+└── README.md                 # This document
 ```
 
 ---
 
-### 5.3 Checkpoint Management & Partial Restoration
+## 4. Setup
 
-Pretrained TSViT models trained on PASTIS-24 can be loaded with **partial restoration** (`partial_restore: True`), which smoothly initializes the temporal encoder and patch embeddings while allowing the DINO-v3 spatial backbone to adapt seamlessly:
+### Step 1 — Clone the Repository
+
+```bash
+git clone https://github.com/Leo4767-C/TSVIT.git
+cd TSVIT
+```
+
+### Step 2 — Install the Environment
+
+**Option A: Using Conda (recommended)**
+
+```bash
+conda env create -f deepsatmodels_env.yml
+conda activate deepsatmodels
+```
+
+**Option B: Using pip in a Python 3.10+ virtualenv**
+
+```bash
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+pip install numpy einops pyyaml tensorboard scikit-learn scipy matplotlib
+```
+
+### Step 3 — Verify Installation
+
+```bash
+python -c "import torch; print('PyTorch:', torch.__version__, '| CUDA available:', torch.cuda.is_available())"
+```
+
+Expected output:
+
+```
+PyTorch: 2.x.x | CUDA available: True
+```
+
+### Step 4 — Prepare PASTIS-24 Data
+
+Place the PASTIS-24 dataset in the `data/` directory following the path specified in the corresponding YAML configuration file.
+
+### Step 5 — Configure Checkpoint (if using pretrained weights)
+
+Ensure the pretrained TSViT checkpoint is placed at the correct path and partial restoration is enabled:
 
 ```yaml
 CHECKPOINT:
@@ -430,57 +244,34 @@ CHECKPOINT:
   save_steps: 1000000000
 ```
 
-When `partial_restore=True`, [`utils/torch_utils.py:load_from_checkpoint`](utils/torch_utils.py) automatically filters out mismatched spatial transformer keys, ensuring zero shape conflicts.
+When `partial_restore: True`, the [`utils/torch_utils.py:load_from_checkpoint`](utils/torch_utils.py) function automatically filters out mismatched spatial transformer keys, ensuring zero shape conflicts.
 
 ---
 
-### 5.4 Configuration Hierarchy
+## 5. Run & Verify
 
-Full benchmark configuration is controlled via [`configs/PASTIS24/TSViT_DINOv3_fold1.yaml`](configs/PASTIS24/TSViT_DINOv3_fold1.yaml):
-
-| YAML Field | Default Value | Description |
-|---|:---:|---|
-| `MODEL.architecture` | `"TSViT_DINOv3"` | Selected model architecture (`TSViT`, `TSViT_DINOv3`, `TSViTcls`). |
-| `MODEL.spatial_backbone` | `"dinov3"` | Activates `DINOv3SpatialEncoder` (2D RoPE, SwiGLU, LayerScale). |
-| `MODEL.img_res` | `24` | Tile dimension in pixels ($24 \times 24$). |
-| `MODEL.patch_size` | `2` | Patch spatial width ($2 \times 2 \to 144$ patches). |
-| `MODEL.dim` | `128` | Transformer token embedding dimension $D$. |
-| `MODEL.temporal_depth` | `4` | Number of Temporal Transformer blocks. |
-| `MODEL.spatial_depth` | `4` | Number of DINO-v3 Spatial Transformer blocks. |
-| `MODEL.heads` | `4` | Number of Multi-Head Self-Attention heads. |
-| `MODEL.dim_head` | `32` | Channel dimension per attention head ($4 \times 32 = 128$). |
-| `SOLVER.loss_function` | `masked_cross_entropy` | Masked Cross-Entropy Loss with validity mask $M$. |
-| `SOLVER.lr_base` | `1.0e-3` | Peak base learning rate. |
-| `SOLVER.lr_min` | `5.0e-6` | Minimum learning rate after cosine decay. |
-| `SOLVER.num_warmup_epochs` | `10` | Linear learning rate warmup duration. |
-
----
-
-## 6. Execution, Verification & Benchmark Guide
-
-All commands run directly from the repository root:
-
-### 6.1 End-to-End Semantic Segmentation
-
-Train TSViT-DINOv3 on the PASTIS-24 benchmark:
+### End-to-End Semantic Segmentation Training
 
 ```bash
-# Single-GPU Execution (GPU 0)
+# Single-GPU execution (GPU 0)
 python train_and_eval/segmentation_training_transf.py \
     --config configs/PASTIS24/TSViT_DINOv3_fold1.yaml \
     --device 0
 
-# Multi-GPU Execution (Distributed over GPUs 0 and 1)
+# Multi-GPU execution (GPUs 0 and 1)
 python train_and_eval/segmentation_training_transf.py \
     --config configs/PASTIS24/TSViT_DINOv3_fold1.yaml \
     --device 0,1
 ```
 
-During training, metrics are printed every `train_metrics_steps` (250 steps) and evaluated every `eval_steps` (2000 steps). Real-time TensorBoard summaries (Loss, mIoU, Accuracy, F1 per class) are logged to `CHECKPOINT.save_path`.
+During training:
+- Metrics are printed every `train_metrics_steps` (250 steps).
+- Validation evaluation runs every `eval_steps` (2000 steps).
+- TensorBoard logs (Loss, mIoU, Accuracy, per-class F1) are saved to `CHECKPOINT.save_path`.
 
-### 6.2 Linear Classifier Probing (`--lin`)
+### Linear Probing Evaluation
 
-To freeze the feature representations and evaluate downstream linear separability of the DINO-v3 spatial features:
+Freeze all feature representations and train only a linear classification head to evaluate downstream linear separability of DINO-v3 spatial features:
 
 ```bash
 python train_and_eval/segmentation_training_transf.py \
@@ -489,9 +280,9 @@ python train_and_eval/segmentation_training_transf.py \
     --lin
 ```
 
-### 6.3 Field-Level Crop Classification
+### Field-Level Crop Classification
 
-To train tile-level crop classification using the DINO-v3 classification model (`TSViTcls_DINOv3` with `[CLS]` token preservation):
+Train tile-level crop classification using the `TSViTcls_DINOv3` model (with [CLS] token preservation):
 
 ```bash
 python train_and_eval/classification_train_transf.py \
@@ -499,65 +290,255 @@ python train_and_eval/classification_train_transf.py \
     --device 0
 ```
 
+### How to Verify Correct Operation
+
+| Check | Expected Behavior |
+|---|---|
+| Loss decreasing | Initial loss ~3.0, drops below 1.0 within the first ~6,500 steps |
+| No CUDA errors | No `CUDA out of memory` or `RuntimeError` messages |
+| Metrics improving | mIoU and Accuracy increase across validation evaluations |
+| TensorBoard populated | Opening TensorBoard shows loss, mIoU, and F1 graphs being updated |
+
 ---
 
-## 7. Experimental Benchmark Results & Comparative Analysis
+## 6. Usage / API
 
-### 7.1 PASTIS-24 Quantitative Benchmark (Fold 1)
+### YAML Configuration
 
-Quantitative evaluation comparing the baseline TSViT models with **TSViT-DINOv3** on the 19-class PASTIS-24 test set:
+All experiment settings are managed through [`configs/PASTIS24/TSViT_DINOv3_fold1.yaml`](configs/PASTIS24/TSViT_DINOv3_fold1.yaml):
 
-| Model Architecture | Spatial Backbone | Spatial Position Encoding | Validation Loss ↓ | mIoU (%) ↑ | Macro F1 (%) ↑ | Overall Accuracy (%) ↑ |
+| YAML Field | Default Value | Description |
+|---|:---:|---|
+| `MODEL.architecture` | `"TSViT_DINOv3"` | Model architecture (`TSViT`, `TSViT_DINOv3`, `TSViTcls`). |
+| `MODEL.spatial_backbone` | `"dinov3"` | Activates `DINOv3SpatialEncoder` (2D RoPE, SwiGLU, LayerScale). |
+| `MODEL.img_res` | `24` | Tile dimension in pixels (24 × 24). |
+| `MODEL.patch_size` | `2` | Patch spatial width (2 × 2 → 144 patches). |
+| `MODEL.dim` | `128` | Transformer token embedding dimension D. |
+| `MODEL.temporal_depth` | `4` | Number of Temporal Transformer blocks. |
+| `MODEL.spatial_depth` | `4` | Number of DINO-v3 Spatial Transformer blocks. |
+| `MODEL.heads` | `4` | Number of Multi-Head Self-Attention heads. |
+| `MODEL.dim_head` | `32` | Channel dimension per attention head (4 × 32 = 128). |
+| `SOLVER.loss_function` | `masked_cross_entropy` | Masked Cross-Entropy Loss with validity mask M. |
+| `SOLVER.lr_base` | `1.0e-3` | Peak base learning rate. |
+| `SOLVER.lr_min` | `5.0e-6` | Minimum learning rate after cosine decay. |
+| `SOLVER.num_warmup_epochs` | `10` | Linear learning rate warmup duration. |
+
+### Command-Line Interface
+
+```bash
+# General syntax for segmentation
+python train_and_eval/segmentation_training_transf.py \
+    --config <path_to_yaml> \
+    --device <gpu_id> \
+    [--lin]                   # Optional: train linear head only
+
+# General syntax for classification
+python train_and_eval/classification_train_transf.py \
+    --config <path_to_yaml> \
+    --device <gpu_id>
+```
+
+| Argument | Required | Description |
+|---|:---:|---|
+| `--config` | Yes | Path to the YAML configuration file |
+| `--device` | Yes | GPU ID (e.g., `0` or `0,1` for multi-GPU) |
+| `--lin` | No | Enable linear probing mode (freeze backbone) |
+
+### Training Loop
+
+Each training step in [`train_and_eval/segmentation_training_transf.py`](train_and_eval/segmentation_training_transf.py):
+
+```python
+def train_step(net, sample, loss_fn, optimizer, device, loss_input_fn):
+    optimizer.zero_grad()                               # 1. Clear parameter gradients
+    outputs = net(sample['inputs'].to(device))          # 2. Forward pass: (B, K=19, H=24, W=24)
+    outputs = outputs.permute(0, 2, 3, 1)               # 3. Transpose to: (B, H=24, W=24, K=19)
+    ground_truth = loss_input_fn(sample, device)        # 4. Fetch target labels and valid mask
+    loss = loss_fn['mean'](outputs, ground_truth)       # 5. Masked Cross-Entropy Loss
+    loss.backward()                                     # 6. Backward pass to compute dL/dθ
+    optimizer.step()                                    # 7. Parameter update via AdamW
+    return outputs, ground_truth, loss
+```
+
+---
+
+## 7. AI Model
+
+### DINO-v3 Components
+
+The DINO-v3 module is implemented in [`models/TSViT/dinov3.py`](models/TSViT/dinov3.py). Each spatial block consists of: pre-LayerNorm, 2D Axial RoPE multi-head attention, LayerScale (γ = 10⁻⁵), and SwiGLU Gated Feed-Forward.
+
+#### 1) 2D Axial Rotary Position Embedding (`DINOv3RoPE`)
+
+For each attention head of dimension 32, feature channels are partitioned equally into vertical and horizontal components (16 rows, 16 columns):
+
+$$
+d_h = \frac{d_{\text{head}}}{2}, \qquad d_w = \frac{d_{\text{head}}}{2}
+$$
+
+Frequencies along each axis are computed with base θ = 100.0:
+
+$$
+\omega_{h, i} = \theta^{-2i / d_h}, \quad 0 \le i < \frac{d_h}{2}
+$$
+
+$$
+\omega_{w, j} = \theta^{-2j / d_w}, \quad 0 \le j < \frac{d_w}{2}
+$$
+
+For a patch token at grid coordinates (y, x) on the 12 × 12 patch grid, the 2D rotary representation R(y, x) rotates the query vector q:
+
+$$
+q_{\text{rot}}(y, x) =
+\begin{pmatrix}
+q_{[0:d_h]} \odot \cos(y \cdot \omega_h) + \text{RotHalf}(q_{[0:d_h]}) \odot \sin(y \cdot \omega_h) \\
+q_{[d_h:d_{\text{head}}]} \odot \cos(x \cdot \omega_w) + \text{RotHalf}(q_{[d_h:d_{\text{head}}]}) \odot \sin(x \cdot \omega_w)
+\end{pmatrix}
+$$
+
+where the half-vector rotation operator ([`DINOv3RoPE.rotate_half`](models/TSViT/dinov3.py)):
+
+$$
+\text{RotHalf}(z) = \left[ -z_{\frac{d}{2}:d}, \; z_{0:\frac{d}{2}} \right]
+$$
+
+**Relative Translation Invariance Proof**:
+The attention logit between patch 1 and patch 2 evaluates to:
+
+$$
+\langle q_{\text{rot}}(y_1, x_1), k_{\text{rot}}(y_2, x_2) \rangle = q^T \mathbf{R}_{2D}^T(y_1, x_1) \mathbf{R}_{2D}(y_2, x_2) k = q^T \mathbf{R}_{2D}(y_1 - y_2, x_1 - x_2) k
+$$
+
+Attention depends strictly on the spatial displacement vector (Δy, Δx), granting true 2D spatial translation equivariance across agricultural parcel boundaries.
+
+#### 2) SwiGLU Gated Feed-Forward Network (`DINOv3GatedMLP`)
+
+Standard FFNs use FFN(x) = GELU(xW⁽¹⁾)W⁽²⁾. In DINO-v3, the SwiGLU architecture employs learned gating and projection matrices:
+
+$$
+\text{SwiGLU}(x) = \left( \text{SiLU}(x W_{\text{gate}}) \odot (x W_{\text{up}}) \right) W_{\text{down}}
+$$
+
+where SiLU(z) = z · σ(z) = z / (1 + e⁻ᶻ). The gating mechanism dynamically controls information flow through multiplicative interaction, avoiding dying neurons.
+
+#### 3) LayerScale Stabilization (`DINOv3LayerScale`)
+
+Deep ViT residual updates are modulated by a learned diagonal tensor γ ∈ ℝᴰ:
+
+$$
+x_{l+1} = x_l + \text{diag}(\gamma_l) \cdot f(x_l), \quad \gamma_l \in \mathbb{R}^D, \quad \text{with initial } \gamma_l = 10^{-5}
+$$
+
+Since γ ≈ 0 at initialization, each DINO-v3 block acts essentially as an identity operator (x ≈ x). This eliminates representation shock when restoring pretrained weights (`partial_restore: True`).
+
+### Loss Function: Masked Cross-Entropy
+
+Agricultural satellite imagery includes clouds, atmospheric distortions, and non-agricultural backgrounds (roads, structures, water bodies) encoded as void label 19. The binary validity mask M:
+
+$$
+M_{b, i, j} =
+\begin{cases}
+1 & \text{if } Y_{b, i, j} \in [0, 18] \\
+0 & \text{if } Y_{b, i, j} = 19 \text{ (void/background)}
+\end{cases}
+$$
+
+Masked Cross-Entropy Loss evaluates strictly over valid crop pixels where M = 1:
+
+$$
+\mathcal{L}_{\text{MCE}}(\hat{Y}, Y, M) = - \frac{1}{\sum_{b, i, j} M_{b, i, j}} \sum_{b=1}^B \sum_{i=1}^H \sum_{j=1}^W M_{b, i, j} \sum_{c=0}^{K-1} I(Y_{b, i, j} = c) \log \left( \frac{\exp(\hat{Y}_{b, i, j, c})}{\sum_{c'=0}^{K-1} \exp(\hat{Y}_{b, i, j, c'})} \right)
+$$
+
+Implementation in [`metrics/loss_functions.py:MaskedCrossEntropyLoss`](metrics/loss_functions.py):
+
+```python
+mask_flat = mask.reshape(-1, 1)
+nclasses = logits.shape[-1]
+logits_flat = logits.reshape(-1, nclasses)
+masked_logits = logits_flat[mask_flat.repeat(1, nclasses)].view(-1, nclasses)
+masked_target = target.reshape(-1, 1)[mask_flat].unsqueeze(dim=-1).to(torch.int64)
+
+log_probs = F.log_softmax(masked_logits, dim=-1)
+loss = -torch.gather(log_probs, dim=1, index=masked_target).mean()
+```
+
+Critical gradient property:
+
+$$
+M_{b, i, j} = 0 \implies \frac{\partial \mathcal{L}_{\text{MCE}}}{\partial \hat{Y}_{b, i, j, k}} \equiv 0.0, \quad \forall k \in [0, K-1]
+$$
+
+Non-crop background and invalid pixels emit identically zero gradient, preventing background noise from corrupting model weights during backpropagation.
+
+### Gradient Flow Through DINO-v3
+
+<p align="center">
+  <img src="figures/gradient-flow-dinov3.png" alt="Gradient Flow Through DINO-v3 Spatial Backbone" width="850"/>
+  <br>
+  <em>Figure 3: Analytical gradient flow through the DINO-v3 Spatial Backbone during backpropagation. The diagram illustrates how continuous non-linear gradients propagate through SwiGLU, LayerScale maintains residual stability via diagonal parameter scaling (γ = 10⁻⁵), and 2D Axial RoPE preserves the Frobenius norm of attention gradients.</em>
+</p>
+
+Core stability mechanisms:
+
+1. **Continuous Non-Linear Gradients (SwiGLU)**: The derivative SiLU'(z) = σ(z)·(1 + z(1 − σ(z))) remains non-zero across active ranges, completely preventing the "dying ReLU" phenomenon.
+
+2. **Gradient Damping via LayerScale** (γ = 10⁻⁵): The small diagonal parameter γ = 10⁻⁵ acts as an inductive gradient damper, protecting deep spatial transformer representations from gradient explosions during early training epochs.
+
+3. **Lossless Gradient Flow via Orthogonal 2D RoPE**: Because the 2D rotary matrix R is unitary (RᵀR = I), rotation is an isometry that preserves the Frobenius norm: ‖∇_q L‖_F = ‖∇_{q_rot} L‖_F, ensuring zero vanishing gradients as spatial representations flow backward into temporal self-attention blocks.
+
+### Optimizer & Learning Rate Schedule
+
+* **AdamW Optimizer**:
+
+$$
+\theta_t = \theta_{t-1} - \eta_t \left( \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon} + \lambda \theta_{t-1} \right)
+$$
+
+where λ = 0.0 (or 0.01), β = (0.9, 0.999), ε = 10⁻⁸.
+
+* **Cosine Annealing with Linear Warmup**:
+  * **Warmup Phase (Epochs 1–10)**: Linear ramp from 10⁻⁸ to peak rate 10⁻³.
+  * **Cosine Annealing Phase (Epochs 11–100)**: Smooth cosine descent from 10⁻³ to minimum rate 5 × 10⁻⁶ over 80,000 steps.
+
+### Benchmark Results
+
+Quantitative evaluation comparing baseline TSViT models with **TSViT-DINOv3** on the 19-class PASTIS-24 test set:
+
+| Architecture | Spatial Backbone | Spatial Position Encoding | Val Loss ↓ | mIoU (%) ↑ | Macro F1 (%) ↑ | OA (%) ↑ |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|
 | TSViT Baseline | Vanilla ViT (GELU) | 1D Static Learnable | 0.4128 | 61.40 | 73.20 | 81.65 |
 | TSViT-Single Token | Vanilla ViT (GELU) | 1D Static Learnable | 0.4410 | 59.80 | 71.50 | 80.12 |
-| **TSViT-DINOv3 (Ours)** | **DINO-v3 Backbone** | **2D Axial RoPE** | **0.3152** | **65.65** | **77.84** | **84.12** |
-| *Net Improvement* | — | — | **-0.0976** | **+4.25%** | **+4.64%** | **+2.47%** |
+| **TSViT-DINOv3** | **DINO-v3 Backbone** | **2D Axial RoPE** | **0.3152** | **65.65** | **77.84** | **84.12** |
+| *Net Improvement* | — | — | **−0.0976** | **+4.25%** | **+4.64%** | **+2.47%** |
 
-### 7.2 Loss Convergence & Training Dynamics
-
-1. **35% Accelerated Warmup Convergence**: TSViT-DINOv3 drops from initial loss $\sim 3.02$ to below $1.0$ within 6,500 steps (compared to 10,000 steps for baseline), because 2D RoPE injects analytical coordinate geometry immediately, relieving the model from learning position topology from scratch.
-2. **Elimination of Gradient Variance Spikes**: LayerScale initialization ($\gamma = 10^{-5}$) prevents mid-training optimization spikes typically observed around steps 8,000–15,000 in vanilla transformers.
-3. **Smooth Loss Asymptote**: Masked Cross-Entropy achieves a lower steady-state validation loss ($0.3152$ vs. $0.4128$), demonstrating superior feature representation.
-
-### 7.3 Parcel Boundary Precision & Shift Invariance
-
-In agricultural SITS, field boundaries are often misclassified by vanilla ViTs due to positional distortion from 1D positional embeddings. By enforcing translation-invariant attention via relative displacement $(\Delta y, \Delta x)$, TSViT-DINOv3 cleanly delineates sharp parcel borders, directly driving the **+4.25% gain in mIoU**.
+Key observations:
+1. **35% Faster Warmup Convergence**: TSViT-DINOv3 drops from initial loss ~3.02 to below 1.0 within 6,500 steps (compared to 10,000 steps for baseline), because 2D RoPE injects analytical coordinate geometry immediately, relieving the model from learning position topology from scratch.
+2. **Elimination of Gradient Variance Spikes**: LayerScale initialization (γ = 10⁻⁵) prevents mid-training optimization spikes typically observed around steps 8,000–15,000 in vanilla transformers.
+3. **Lower Steady-State Loss**: Masked Cross-Entropy achieves a lower validation loss (0.3152 vs. 0.4128), demonstrating superior feature representation.
+4. **Improved Parcel Boundary Precision**: Translation-invariant attention via relative displacement (Δy, Δx) enables TSViT-DINOv3 to cleanly delineate sharp parcel borders, directly driving the +4.25% mIoU gain.
 
 ---
 
-## 8. Troubleshooting & Engineering Gotchas
+## 8. Troubleshooting
 
 | Symptom / Error | Root Cause | Solution |
 |---|---|---|
-| `CUDA out of memory` during training | Large batch size with long time series ($T=60$). | Reduce `DATASETS.train.batch_size` in YAML (e.g. from 48 to 16 or 24), or enable multi-GPU `--device 0,1`. |
+| `CUDA out of memory` during training | Large batch size with long time series (T=60). | Reduce `DATASETS.train.batch_size` in YAML (e.g., from 48 to 16 or 24), or enable multi-GPU `--device 0,1`. |
 | `Missing key(s) in state_dict: space_transformer...` | Mismatch between baseline checkpoint keys and DINO-v3 spatial module. | Ensure `CHECKPOINT.partial_restore: True` is set in the configuration file. |
 | `RuntimeError: The size of tensor a must match size of tensor b` | Grid dimension mismatch in 2D RoPE cache. | Verify `img_res` (24) is evenly divisible by `patch_size` (2), producing a 12 × 12 patch grid. |
-| `ValueError: no valid target pixels for mean reduction` | Batch contains only non-crop background or cloud pixels (validity mask $M = 0$). | Expected behavior for fully void tiles; ensure dataset splits contain valid agricultural parcel annotations. |
+| `ValueError: no valid target pixels for mean reduction` | Batch contains only non-crop background or cloud pixels (validity mask M = 0). | Expected behavior for fully void tiles; ensure dataset splits contain valid agricultural parcel annotations. |
 | Slow DataLoader throughput | Low `num_workers` causing GPU starvation. | Set `DATASETS.train.num_workers: 4` or `8` to enable asynchronous multi-process tile loading. |
+| Loss not decreasing after several thousand steps | Learning rate too high or incompatible checkpoint. | Check `SOLVER.lr_base`, try reducing to 5e-4. Confirm the checkpoint matches the model version. |
+| `ImportError: einops` | Missing `einops` library. | Run `pip install einops`. |
 
 ---
 
-## 9. Architectural Discussion: Spatial Replacement vs. Patch-Embedding DINOv3
-
-* **Approach 1 (Front-End Input Patch-Embedding Substitution)**:  
-  `Satellite (10 Bands)` → *(Discard 7 Bands)* → `RGB` → *(Upsample 24×24 to 192×192)* → `Frozen DINOv3` → `Projection` → `TSViT`
-
-* **Approach 2 (Full Spatial Transformer Backbone Replacement - Ours)**:  
-  `Satellite (10 Bands + DOY)` → `Patch Embedding` → `Temporal ViT (T=60)` → `DINO-v3 Spatial Backbone` → `Segmentation Head`
-
-### Why Spatial Backbone Replacement is Superior for SITS:
-1. **Preserves Native Multispectral Calibration**: Sentinel-2 provides 10 physical reflectance bands critical for vegetation indices (e.g., Red Edge bands B05–B07, NIR B08, SWIR B11–B12). Discarding 7 bands to fit an RGB backbone loses essential physiological crop signals.
-2. **Avoids Destructive Bilinear Upsampling**: Forcing $24 \times 24$ tiles into $192 \times 192$ through 8× interpolation introduces artificial blur without adding real ground resolution.
-3. **Temporal-First Factorization**: Applying DINO-v3 after the temporal encoder allows spatial attention to operate directly on high-level, phenologically aggregated crop class tokens, maximizing semantic delineation.
-
----
-
-## 10. References, License & Acknowledgements
+## References
 
 - **TSViT / DeepSatModels**: Michail Tarasiou, Erik Chavez, Stefanos Zafeiriou. *"ViTs for SITS: Vision Transformers for Satellite Image Time Series"*, CVPR 2023. [[Paper](https://arxiv.org/abs/2301.04944)] [[Code](https://github.com/michaeltrs/DeepSatModels)].
 - **DINO-v3**: Meta AI Research. *"DINO-v3: Vision Transformers for Self-Supervised Visual Representation Learning"*, 2024. [[Paper](https://arxiv.org/abs/2508.10104)] [[Meta Repository](https://github.com/facebookresearch/dinov3)].
 - **PASTIS Benchmark**: Vivien Sainte Fare Garnot, Loic Landrieu. *"Panoptic Segmentation of Satellite Image Time Series with Field-Level Crop Labels"*, ICCV 2021. [[Dataset](https://github.com/VSainteuf/pastis-benchmark)].
 
-### License
-This project is licensed under the **Apache License 2.0** - see the [LICENSE.txt](LICENSE.txt) file for details.
+## License
+
+This project is licensed under the **Apache License 2.0** — see the [LICENSE.txt](LICENSE.txt) file for details.
